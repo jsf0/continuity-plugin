@@ -14,6 +14,7 @@ ENTITY_BONUS = 1.75
 CONFIDENCE_WEIGHT = 0.75
 IMPORTANCE_WEIGHT = 0.75
 FTS_WEIGHT = 1.0
+CAPSULE_SCOPE_BONUS = 4.0
 TRUST_PENALTIES = {
     "remote_untrusted": 1.0,
 }
@@ -143,6 +144,9 @@ def _metadata_score(
     if scope_project and record.scope_project == scope_project:
         score += SCOPE_BONUS
         reasons.append("scope")
+        if record.kind == "active_project_state":
+            score += CAPSULE_SCOPE_BONUS
+            reasons.append("project_capsule")
     elif scope_project and record.scope_project and record.scope_project != scope_project:
         score -= SCOPE_BONUS
         reasons.append("scope_mismatch")

@@ -8,6 +8,8 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
+from continuity.models import ContextRecord, SourceRef
+
 
 @dataclass(frozen=True)
 class ProjectContext:
@@ -18,6 +20,61 @@ class ProjectContext:
     display_name: str
     repo_root: Path | None = None
     repo_remote: str | None = None
+
+
+def build_project_capsule(project: ProjectContext, records: list[ContextRecord]) -> ContextRecord:
+    """Build a compact active-project-state capsule from project-scoped records."""
+    scoped = [
+        record
+        for record in records
+        if record.kind != "active_project_state"
+        and (record.scope_project in {None, project.display_name} or record.scope_repo == project.repo_remote)
+    ]
+    sections = [f"Project: {project.display_name}."]
+    sections.extend(_section("Known pitfalls", _summaries_for(scoped, {"lesson_learned"})))
+    sections.extend(_section("User decisions", _summaries_for(scoped, {"decision"})))
+    sections.extend(_section("Verification", _summaries_for(scoped, {"project_convention"})))
+    sections.extend(_section("User preferences", _summaries_for(scoped, {"user_preference"})))
+    if len(sections) == 1:
+        sections.append("No durable project facts recorded yet.")
+    sources = [
+        SourceRef(type="memory", id=record.id, label=record.kind)
+        for record in scoped[:20]
+    ]
+    return ContextRecord.new(
+        id=f"capsule_{_stable_hash(project.project_id)}",
+        kind="active_project_state",
+        title=f"Project capsule: {project.display_name}",
+        summary="\n".join(sections),
+        scope_project=project.display_name,
+        scope_repo=project.repo_remote,
+        tags=["project_capsule", "active_project_state", project.display_name],
+        entities=[project.project_id, project.repo_remote or project.display_name],
+        sources=sources,
+        confidence=0.85,
+        importance=0.95,
+        trust_level="agent_observed",
+    )
+
+
+def _section(title: str, items: list[str]) -> list[str]:
+    if not items:
+        return []
+    return [f"{title}:", *[f"- {item}" for item in items[:8]]]
+
+
+def _summaries_for(records: list[ContextRecord], kinds: set[str]) -> list[str]:
+    seen: set[str] = set()
+    summaries: list[str] = []
+    for record in records:
+        if record.kind not in kinds:
+            continue
+        normalized = " ".join(record.summary.lower().split())
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        summaries.append(record.summary)
+    return summaries
 
 
 def detect_project(cwd: Path | str | None = None) -> ProjectContext:

@@ -13,7 +13,7 @@ from typing import Any, Protocol
 
 from continuity.config import ContinuityConfig
 from continuity.extraction import extract_records_from_messages
-from continuity.project import ProjectContext, detect_project
+from continuity.project import ProjectContext, build_project_capsule, detect_project
 from continuity.retrieval import ContinuityRetriever, RetrievalHit
 from continuity.store import ContinuityStore
 from continuity.tools import (
@@ -159,6 +159,7 @@ class ContinuityProvider(MemoryProvider):
         )
         for record in records:
             self._store.upsert_record(record)
+        self._update_project_capsule()
         self._store.mark_session_observations_consolidated(self._session_id)
 
     def on_pre_compress(self, messages: list[dict[str, Any]]) -> str:
@@ -234,11 +235,27 @@ class ContinuityProvider(MemoryProvider):
             "max_records": self._config.max_records,
             "max_chars": self._config.max_chars,
             "vector_enabled": self._config.vector_enabled,
-            "phase": "phase-5-session-consolidation",
+            "phase": "phase-6-project-capsules",
         }
 
     def _project_display_name(self) -> str | None:
         return self._project.display_name if self._project else None
+
+    def _update_project_capsule(self) -> None:
+        if not self._store or not self._project:
+            return
+        project_records = [
+            record
+            for record in self._store.list_records()
+            if record.kind != "active_project_state"
+            and (
+                record.scope_project in {None, self._project.display_name}
+                or record.scope_repo == self._project.repo_remote
+            )
+        ]
+        if not project_records:
+            return
+        self._store.upsert_record(build_project_capsule(self._project, project_records))
 
 
 def _format_prefetch_context(

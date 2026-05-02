@@ -57,7 +57,11 @@ def test_on_session_end_dedupes_repeated_records(tmp_path: Path) -> None:
     provider.on_session_end(messages)
 
     records = provider._store.list_records()
-    matching = [record for record in records if "foundation-first" in record.summary]
+    matching = [
+        record
+        for record in records
+        if record.kind != "active_project_state" and "foundation-first" in record.summary
+    ]
     assert len(matching) == 1
 
 
