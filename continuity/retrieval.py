@@ -27,6 +27,32 @@ ALIASES = {
     "cleanup": {"foundation", "foundation-first"},
 }
 
+STOPWORDS = frozenset(
+    {
+        "a",
+        "an",
+        "and",
+        "again",
+        "are",
+        "doing",
+        "for",
+        "how",
+        "i",
+        "in",
+        "is",
+        "it",
+        "of",
+        "out",
+        "the",
+        "thing",
+        "to",
+        "was",
+        "we",
+        "what",
+        "without",
+    }
+)
+
 
 @dataclass(frozen=True)
 class RetrievalHit:
@@ -110,6 +136,10 @@ def _metadata_score(
         score += 0.25 * len(text_matches)
         reasons.append("text")
 
+    relevance_reasons = list(reasons)
+    if not relevance_reasons:
+        return 0.0, []
+
     if scope_project and record.scope_project == scope_project:
         score += SCOPE_BONUS
         reasons.append("scope")
@@ -125,7 +155,11 @@ def _metadata_score(
 
 
 def _query_tokens(query: str) -> set[str]:
-    return {_normalize_token(token) for token in re.findall(r"[\w:-]+", query.lower())}
+    return {
+        token
+        for token in (_normalize_token(raw) for raw in re.findall(r"[\w:-]+", query.lower()))
+        if token and token not in STOPWORDS
+    }
 
 
 def _expand_tokens(tokens: set[str]) -> set[str]:

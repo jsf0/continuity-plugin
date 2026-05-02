@@ -11,6 +11,9 @@ import json
 from pathlib import Path
 from typing import Any, Protocol
 
+from continuity.config import ContinuityConfig
+from continuity.project import ProjectContext, detect_project
+from continuity.retrieval import ContinuityRetriever, RetrievalHit
 from continuity.store import ContinuityStore
 
 try:  # pragma: no cover - exercised when running inside Hermes Agent.
@@ -55,6 +58,8 @@ class ContinuityProvider(MemoryProvider):
         self._platform = ""
         self._agent_context = ""
         self._store: ContinuityStore | None = None
+        self._config = ContinuityConfig()
+        self._project: ProjectContext | None = None
 
     @property
     def name(self) -> str:
@@ -76,6 +81,9 @@ class ContinuityProvider(MemoryProvider):
         self._data_dir = data_dir
         self._platform = str(kwargs.get("platform") or "")
         self._agent_context = str(kwargs.get("agent_context") or "")
+        raw_config = kwargs.get("continuity_config")
+        self._config = ContinuityConfig.from_mapping(raw_config if isinstance(raw_config, dict) else {})
+        self._project = detect_project()
         self._store = ContinuityStore(data_dir / "continuity.db")
         self._store.migrate()
         self._initialized = True
@@ -84,10 +92,38 @@ class ContinuityProvider(MemoryProvider):
         """Keep Phase 1 prompt impact at zero."""
         return ""
 
-    def prefetch(self, query: str, *, session_id: str = "") -> str:
-        """Return no recalled context until the retrieval phase is implemented."""
-        _ = (query, session_id)
-        return ""
+    def prefetch(
+        self,
+        query: str,
+        *,
+        session_id: str = "",
+        scope_project: str | None = None,
+    ) -> str:
+        """Retrieve compact relevant continuity context for the current turn."""
+        _ = session_id
+        if not self._store or not query.strip():
+            return ""
+        effective_scope = scope_project or self._project_display_name()
+        hits = ContinuityRetriever(self._store).search(
+            query,
+            scope_project=effective_scope,
+            limit=self._config.max_records,
+        )
+        selected = [hit for hit in hits if hit.score >= self._config.min_score]
+        output, included = _format_prefetch_context(
+            selected,
+            max_chars=self._config.max_chars,
+            include_sources=self._config.include_sources,
+            include_scores=self._config.include_scores,
+        )
+        self._store.log_retrieval_event(
+            query=query,
+            selected_ids=[hit.record.id for hit in included],
+            skipped_ids=[hit.record.id for hit in selected if hit.record.id not in {i.record.id for i in included}],
+            scores={hit.record.id: hit.score for hit in selected},
+            max_chars=self._config.max_chars,
+        )
+        return output
 
     def queue_prefetch(self, query: str, *, session_id: str = "") -> None:
         """No-op until retrieval/background prefetch exists."""
@@ -151,9 +187,71 @@ class ContinuityProvider(MemoryProvider):
             "agent_context": self._agent_context,
             "record_count": self._store.count_records() if self._store else 0,
             "db_path": str(self._store.db_path) if self._store else None,
-            "vector_enabled": False,
-            "phase": "phase-1-skeleton",
+            "current_project": self._project.project_id if self._project else None,
+            "current_project_display_name": self._project.display_name if self._project else None,
+            "max_records": self._config.max_records,
+            "max_chars": self._config.max_chars,
+            "vector_enabled": self._config.vector_enabled,
+            "phase": "phase-3-prefetch-baseline",
         }
+
+    def _project_display_name(self) -> str | None:
+        return self._project.display_name if self._project else None
+
+
+def _format_prefetch_context(
+    hits: list[RetrievalHit],
+    *,
+    max_chars: int,
+    include_sources: bool,
+    include_scores: bool,
+) -> tuple[str, list[RetrievalHit]]:
+    if not hits:
+        return "", []
+    lines = ["Relevant continuity memory:"]
+    included: list[RetrievalHit] = []
+    for hit in hits:
+        candidate_lines = _format_hit(len(included) + 1, hit, include_sources, include_scores)
+        candidate_output = "\n".join([*lines, *candidate_lines])
+        if len(candidate_output) > max_chars:
+            continue
+        lines.extend(candidate_lines)
+        included.append(hit)
+    if not included:
+        return "", []
+    return "\n".join(lines), included
+
+
+def _format_hit(
+    index: int,
+    hit: RetrievalHit,
+    include_sources: bool,
+    include_scores: bool,
+) -> list[str]:
+    record = hit.record
+    meta_parts = [record.kind]
+    if record.scope_project:
+        meta_parts.append(f"project={record.scope_project}")
+    meta_parts.append(f"confidence={record.confidence:.2f}")
+    if include_scores:
+        meta_parts.append(f"score={hit.score:.2f}")
+    lines = [f"{index}. [{' | '.join(meta_parts)}]", f"   {record.summary}"]
+    if include_sources and record.sources:
+        source_text = "; ".join(_format_source(source) for source in record.sources)
+        if source_text:
+            lines.append(f"   Sources: {source_text}")
+    return lines
+
+
+def _format_source(source: object) -> str:
+    source_type = getattr(source, "type", "source")
+    source_id = getattr(source, "id", None)
+    source_range = getattr(source, "range", None)
+    source_uri = getattr(source, "uri", None)
+    label = f"{source_type}:{source_id or source_uri or 'unknown'}"
+    if source_range:
+        label += f" {source_range}"
+    return label
 
 
 def register(ctx: _RegistrationContext) -> None:

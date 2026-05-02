@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -182,6 +183,40 @@ class ContinuityStore:
                 (fts_query, limit),
             ).fetchall()
         return [FtsHit(record=_record_from_row(row), rank=float(row["rank"])) for row in rows]
+
+    def log_retrieval_event(
+        self,
+        *,
+        query: str,
+        selected_ids: list[str],
+        skipped_ids: list[str] | None = None,
+        scores: dict[str, float] | None = None,
+        max_chars: int | None = None,
+    ) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO retrieval_events(
+                  id, query, selected_ids_json, skipped_ids_json, scores_json, max_chars, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    uuid.uuid4().hex,
+                    query,
+                    json.dumps(selected_ids, ensure_ascii=False),
+                    json.dumps(skipped_ids or [], ensure_ascii=False),
+                    json.dumps(scores or {}, ensure_ascii=False),
+                    max_chars,
+                    utc_now(),
+                ),
+            )
+
+    def last_retrieval_event(self) -> dict[str, object] | None:
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM retrieval_events ORDER BY created_at DESC, rowid DESC LIMIT 1"
+            ).fetchone()
+        return dict(row) if row else None
 
     def _replace_fts_row(self, conn: sqlite3.Connection, record: ContextRecord) -> None:
         conn.execute("DELETE FROM context_records_fts WHERE id = ?", (record.id,))
