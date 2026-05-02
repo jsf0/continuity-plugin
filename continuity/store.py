@@ -11,7 +11,7 @@ from pathlib import Path
 from continuity.models import ContextRecord, SourceRef, utc_now
 from continuity.security import sanitize_observation_text
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 @dataclass(frozen=True)
@@ -97,7 +97,21 @@ class ContinuityStore:
                   max_chars INTEGER,
                   created_at TEXT NOT NULL
                 );
+
+                CREATE TABLE IF NOT EXISTS context_record_vectors (
+                  record_id TEXT NOT NULL,
+                  model TEXT NOT NULL,
+                  dimensions INTEGER NOT NULL,
+                  vector_json TEXT NOT NULL,
+                  updated_at TEXT NOT NULL,
+                  PRIMARY KEY(record_id, model),
+                  FOREIGN KEY(record_id) REFERENCES context_records(id) ON DELETE CASCADE
+                );
                 """
+            )
+            conn.execute(
+                "INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)",
+                (1, utc_now()),
             )
             conn.execute(
                 "INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)",
@@ -149,7 +163,9 @@ class ContinuityStore:
 
     def get_record(self, record_id: str) -> ContextRecord | None:
         with self.connect() as conn:
-            row = conn.execute("SELECT * FROM context_records WHERE id = ?", (record_id,)).fetchone()
+            row = conn.execute(
+                "SELECT * FROM context_records WHERE id = ?", (record_id,)
+            ).fetchone()
         return _record_from_row(row) if row else None
 
     def list_records(self) -> list[ContextRecord]:
@@ -166,6 +182,70 @@ class ContinuityStore:
         with self.connect() as conn:
             conn.execute("DELETE FROM context_records WHERE id = ?", (record_id,))
             conn.execute("DELETE FROM context_records_fts WHERE id = ?", (record_id,))
+            conn.execute("DELETE FROM context_record_vectors WHERE record_id = ?", (record_id,))
+
+    def upsert_vector(
+        self,
+        *,
+        record_id: str,
+        model: str,
+        dimensions: int,
+        vector: list[float],
+    ) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO context_record_vectors(record_id, model, dimensions, vector_json, updated_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(record_id, model) DO UPDATE SET
+                  dimensions=excluded.dimensions,
+                  vector_json=excluded.vector_json,
+                  updated_at=excluded.updated_at
+                """,
+                (
+                    record_id,
+                    model,
+                    dimensions,
+                    json.dumps(vector, separators=(",", ":")),
+                    utc_now(),
+                ),
+            )
+
+    def delete_vector(self, record_id: str, *, model: str | None = None) -> None:
+        with self.connect() as conn:
+            if model is None:
+                conn.execute("DELETE FROM context_record_vectors WHERE record_id = ?", (record_id,))
+            else:
+                conn.execute(
+                    "DELETE FROM context_record_vectors WHERE record_id = ? AND model = ?",
+                    (record_id, model),
+                )
+
+    def list_vectors(self, *, model: str) -> list[dict[str, object]]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT record_id, model, dimensions, vector_json, updated_at
+                FROM context_record_vectors
+                WHERE model = ?
+                ORDER BY record_id
+                """,
+                (model,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def count_vectors(self, *, model: str | None = None) -> int:
+        with self.connect() as conn:
+            if model is None:
+                row = conn.execute(
+                    "SELECT COUNT(*) AS count FROM context_record_vectors"
+                ).fetchone()
+            else:
+                row = conn.execute(
+                    "SELECT COUNT(*) AS count FROM context_record_vectors WHERE model = ?",
+                    (model,),
+                ).fetchone()
+        return int(row["count"])
 
     def fts_search(self, query: str, *, limit: int) -> list[FtsHit]:
         fts_query = _fts_query(query)
@@ -323,7 +403,9 @@ def _record_from_row(row: sqlite3.Row) -> ContextRecord:
             "details": row["details"],
             "tags": json.loads(row["tags_json"]),
             "entities": json.loads(row["entities_json"]),
-            "sources": [SourceRef.from_dict(item).to_dict() for item in json.loads(row["sources_json"])],
+            "sources": [
+                SourceRef.from_dict(item).to_dict() for item in json.loads(row["sources_json"])
+            ],
             "confidence": row["confidence"],
             "importance": row["importance"],
             "trust_level": row["trust_level"],

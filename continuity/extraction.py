@@ -71,7 +71,9 @@ def _clean_summary(text: str) -> str:
 
 
 def _record_id(kind: str, summary: str, scope_project: str | None) -> str:
-    digest = hashlib.sha256(f"{kind}\0{scope_project or ''}\0{summary.lower()}".encode()).hexdigest()
+    digest = hashlib.sha256(
+        f"{kind}\0{scope_project or ''}\0{summary.lower()}".encode()
+    ).hexdigest()
     return f"r_{kind}_{digest[:16]}"
 
 

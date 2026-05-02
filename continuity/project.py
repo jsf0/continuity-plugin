@@ -28,7 +28,10 @@ def build_project_capsule(project: ProjectContext, records: list[ContextRecord])
         record
         for record in records
         if record.kind != "active_project_state"
-        and (record.scope_project in {None, project.display_name} or record.scope_repo == project.repo_remote)
+        and (
+            record.scope_project in {None, project.display_name}
+            or record.scope_repo == project.repo_remote
+        )
     ]
     sections = [f"Project: {project.display_name}."]
     sections.extend(_section("Known pitfalls", _summaries_for(scoped, {"lesson_learned"})))
@@ -37,10 +40,7 @@ def build_project_capsule(project: ProjectContext, records: list[ContextRecord])
     sections.extend(_section("User preferences", _summaries_for(scoped, {"user_preference"})))
     if len(sections) == 1:
         sections.append("No durable project facts recorded yet.")
-    sources = [
-        SourceRef(type="memory", id=record.id, label=record.kind)
-        for record in scoped[:20]
-    ]
+    sources = [SourceRef(type="memory", id=record.id, label=record.kind) for record in scoped[:20]]
     return ContextRecord.new(
         id=f"capsule_{_stable_hash(project.project_id)}",
         kind="active_project_state",

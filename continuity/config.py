@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any
 
 VALID_SESSION_STRATEGIES = frozenset({"per-repo", "per-directory", "global", "per-session"})
+VALID_VECTOR_BACKENDS = frozenset({"none", "sqlite-hash", "hash", "sqlite-json"})
 
 
 @dataclass(frozen=True)
@@ -35,6 +36,9 @@ class ContinuityConfig:
         strategy = str(data.get("session_strategy") or "per-repo")
         if strategy not in VALID_SESSION_STRATEGIES:
             strategy = "per-repo"
+        vector_backend = str(vector.get("backend") or "none")
+        if vector_backend not in VALID_VECTOR_BACKENDS:
+            vector_backend = "none"
         return cls(
             max_records=max(1, _int(data.get("max_records"), 5)),
             max_chars=max(200, _int(data.get("max_chars"), 1800)),
@@ -49,7 +53,7 @@ class ContinuityConfig:
             stale_after_days=max(1, _int(data.get("stale_after_days"), 180)),
             observation_max_chars=max(200, _int(data.get("observation_max_chars"), 4000)),
             vector_enabled=_bool(vector.get("enabled"), False),
-            vector_backend=str(vector.get("backend") or "none"),
+            vector_backend=vector_backend,
             embedding_model=_optional_str(vector.get("embedding_model")),
         )
 

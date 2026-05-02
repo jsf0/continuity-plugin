@@ -30,11 +30,16 @@ def test_on_session_end_consolidates_records_and_marks_observations(tmp_path: Pa
     provider = initialized_provider(tmp_path, min_turns=1)
     assert provider._store is not None
 
-    provider.sync_turn("Remember: I prefer foundation-first sequencing.", "Noted.", session_id="phase5-session")
+    provider.sync_turn(
+        "Remember: I prefer foundation-first sequencing.", "Noted.", session_id="phase5-session"
+    )
     provider.on_session_end(
         [
             {"role": "user", "content": "Remember: I prefer foundation-first sequencing."},
-            {"role": "assistant", "content": "Lesson learned: delegate_task can timeout with api_calls:0."},
+            {
+                "role": "assistant",
+                "content": "Lesson learned: delegate_task can timeout with api_calls:0.",
+            },
         ]
     )
 
@@ -69,9 +74,11 @@ def test_on_session_end_skips_short_sessions_by_default(tmp_path: Path) -> None:
     provider = initialized_provider(tmp_path, min_turns=3)
     assert provider._store is not None
 
-    provider.on_session_end([
-        {"role": "user", "content": "Remember: I prefer foundation-first sequencing."},
-        {"role": "assistant", "content": "Noted."},
-    ])
+    provider.on_session_end(
+        [
+            {"role": "user", "content": "Remember: I prefer foundation-first sequencing."},
+            {"role": "assistant", "content": "Noted."},
+        ]
+    )
 
     assert provider._store.count_records() == 0

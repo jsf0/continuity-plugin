@@ -61,7 +61,9 @@ def test_build_project_capsule_sections_and_dedupes() -> None:
 def test_project_capsule_is_preferred_for_project_over_individual_records(tmp_path: Path) -> None:
     store = ContinuityStore(tmp_path / "continuity.db")
     store.migrate()
-    individual = record("r1", "lesson_learned", "patch lint can falsely report Rust 2015 async errors.")
+    individual = record(
+        "r1", "lesson_learned", "patch lint can falsely report Rust 2015 async errors."
+    )
     capsule = build_project_capsule(project(), [individual])
     store.upsert_record(individual)
     store.upsert_record(capsule)

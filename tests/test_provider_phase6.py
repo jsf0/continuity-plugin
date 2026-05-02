@@ -20,7 +20,10 @@ def test_on_session_end_updates_project_capsule(tmp_path: Path, monkeypatch) -> 
     provider.on_session_end(
         [
             {"role": "user", "content": "Remember: I prefer foundation-first sequencing."},
-            {"role": "assistant", "content": "Lesson learned: patch lint can falsely report Rust 2015 async errors."},
+            {
+                "role": "assistant",
+                "content": "Lesson learned: patch lint can falsely report Rust 2015 async errors.",
+            },
             {"role": "assistant", "content": "Decision: do not add auth layer to guard-proxy."},
         ]
     )
@@ -37,8 +40,13 @@ def test_on_session_end_updates_project_capsule(tmp_path: Path, monkeypatch) -> 
     provider.on_session_end(
         [
             {"role": "user", "content": "Remember: I prefer foundation-first sequencing."},
-            {"role": "assistant", "content": "Lesson learned: patch lint can falsely report Rust 2015 async errors."},
+            {
+                "role": "assistant",
+                "content": "Lesson learned: patch lint can falsely report Rust 2015 async errors.",
+            },
         ]
     )
-    capsules = [record for record in provider._store.list_records() if record.kind == "active_project_state"]
+    capsules = [
+        record for record in provider._store.list_records() if record.kind == "active_project_state"
+    ]
     assert len(capsules) == 1

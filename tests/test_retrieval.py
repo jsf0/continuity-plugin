@@ -37,7 +37,9 @@ def seeded_store(tmp_path: Path) -> ContinuityStore:
 def test_retriever_boosts_project_scoped_exact_matches(tmp_path: Path) -> None:
     retriever = ContinuityRetriever(seeded_store(tmp_path))
 
-    hits = retriever.search("the subagent timed out without doing anything again", scope_project="guard-proxy", limit=3)
+    hits = retriever.search(
+        "the subagent timed out without doing anything again", scope_project="guard-proxy", limit=3
+    )
 
     assert hits[0].record.id == "r_delegate_timeout"
     assert hits[0].score > 0
@@ -66,4 +68,6 @@ def test_eval_fixture_queries_pass_phase2_retrieval(tmp_path: Path) -> None:
         for record_id in query.get("must_include", []):
             assert record_id in hit_ids, f"{record_id} missing for query {query['query']!r}"
         for record_id in query.get("must_not_include", []):
-            assert record_id not in hit_ids, f"{record_id} unexpectedly returned for {query['query']!r}"
+            assert record_id not in hit_ids, (
+                f"{record_id} unexpectedly returned for {query['query']!r}"
+            )

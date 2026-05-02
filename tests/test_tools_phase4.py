@@ -12,7 +12,9 @@ def initialized_provider(tmp_path: Path) -> ContinuityProvider:
     return provider
 
 
-def call(provider: ContinuityProvider, tool_name: str, args: dict[str, object]) -> dict[str, object]:
+def call(
+    provider: ContinuityProvider, tool_name: str, args: dict[str, object]
+) -> dict[str, object]:
     return json.loads(provider.handle_tool_call(tool_name, args))
 
 
@@ -57,7 +59,9 @@ def test_add_get_search_delete_record_tool_flow(tmp_path: Path) -> None:
     assert fetched["success"] is True
     assert fetched["record"]["summary"].startswith("delegate_task can return")
 
-    searched = call(provider, "continuity_search", {"query": "subagent timeout api_calls:0", "limit": 3})
+    searched = call(
+        provider, "continuity_search", {"query": "subagent timeout api_calls:0", "limit": 3}
+    )
     assert searched["success"] is True
     assert searched["results"][0]["id"] == "r_tool_delegate"
     assert searched["results"][0]["score"] > 0
@@ -78,7 +82,9 @@ def test_add_get_search_delete_record_tool_flow(tmp_path: Path) -> None:
 def test_add_tool_validates_required_fields(tmp_path: Path) -> None:
     provider = initialized_provider(tmp_path)
 
-    result = call(provider, "continuity_add", {"kind": "lesson_learned", "summary": "missing title"})
+    result = call(
+        provider, "continuity_add", {"kind": "lesson_learned", "summary": "missing title"}
+    )
 
     assert result["success"] is False
     assert "title" in result["error"]

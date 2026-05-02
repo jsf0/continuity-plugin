@@ -5,6 +5,7 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
+from continuity.embeddings import VectorBackend
 from continuity.models import ContextRecord, SourceRef
 from continuity.retrieval import ContinuityRetriever, RetrievalHit
 from continuity.store import ContinuityStore
@@ -27,7 +28,10 @@ CONTINUITY_SEARCH_SCHEMA: dict[str, object] = {
         "properties": {
             "query": {"type": "string", "description": "What to search for."},
             "limit": {"type": "integer", "description": "Maximum results to return."},
-            "scope_project": {"type": "string", "description": "Optional project scope filter/boost."},
+            "scope_project": {
+                "type": "string",
+                "description": "Optional project scope filter/boost.",
+            },
         },
         "required": ["query"],
     },
@@ -88,13 +92,22 @@ ALL_TOOL_SCHEMAS = [
 ]
 
 
-def handle_search(store: ContinuityStore, args: dict[str, Any]) -> dict[str, object]:
+def handle_search(
+    store: ContinuityStore,
+    args: dict[str, Any],
+    *,
+    vector_backend: VectorBackend | None = None,
+) -> dict[str, object]:
     query = str(args.get("query") or "").strip()
     if not query:
         return {"success": False, "error": "query is required for continuity_search"}
     limit = _bounded_int(args.get("limit"), default=5, minimum=1, maximum=20)
     scope_project = _optional_str(args.get("scope_project"))
-    hits = ContinuityRetriever(store).search(query, scope_project=scope_project, limit=limit)
+    hits = ContinuityRetriever(store, vector_backend=vector_backend).search(
+        query,
+        scope_project=scope_project,
+        limit=limit,
+    )
     return {
         "success": True,
         "query": query,
@@ -113,7 +126,9 @@ def handle_get(store: ContinuityStore, args: dict[str, Any]) -> dict[str, object
 
 
 def handle_add(store: ContinuityStore, args: dict[str, Any]) -> dict[str, object]:
-    missing = [name for name in ("kind", "title", "summary") if not str(args.get(name) or "").strip()]
+    missing = [
+        name for name in ("kind", "title", "summary") if not str(args.get(name) or "").strip()
+    ]
     if missing:
         return {"success": False, "error": f"missing required field(s): {', '.join(missing)}"}
     try:

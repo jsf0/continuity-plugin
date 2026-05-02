@@ -12,7 +12,9 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from continuity.config import ContinuityConfig
+from continuity.embeddings import VectorBackend, build_vector_backend, index_records
 from continuity.extraction import extract_records_from_messages
+from continuity.models import ContextRecord
 from continuity.project import ProjectContext, build_project_capsule, detect_project
 from continuity.retrieval import ContinuityRetriever, RetrievalHit
 from continuity.store import ContinuityStore
@@ -39,7 +41,6 @@ except ModuleNotFoundError:  # Standalone test/dev mode without Hermes on sys.pa
         """
 
 
-
 class _RegistrationContext(Protocol):
     def register_memory_provider(self, provider: object) -> None: ...
 
@@ -61,6 +62,7 @@ class ContinuityProvider(MemoryProvider):
         self._store: ContinuityStore | None = None
         self._config = ContinuityConfig()
         self._project: ProjectContext | None = None
+        self._vector_backend: VectorBackend | None = None
         self._turn_index = 0
 
     @property
@@ -74,7 +76,11 @@ class ContinuityProvider(MemoryProvider):
     def initialize(self, session_id: str, **kwargs: object) -> None:
         """Initialize provider-local state for a Hermes session."""
         hermes_home_value = kwargs.get("hermes_home")
-        hermes_home = Path(str(hermes_home_value)).expanduser() if hermes_home_value else Path.home() / ".hermes"
+        hermes_home = (
+            Path(str(hermes_home_value)).expanduser()
+            if hermes_home_value
+            else Path.home() / ".hermes"
+        )
         data_dir = hermes_home / "continuity"
         data_dir.mkdir(parents=True, exist_ok=True)
 
@@ -84,10 +90,14 @@ class ContinuityProvider(MemoryProvider):
         self._platform = str(kwargs.get("platform") or "")
         self._agent_context = str(kwargs.get("agent_context") or "")
         raw_config = kwargs.get("continuity_config")
-        self._config = ContinuityConfig.from_mapping(raw_config if isinstance(raw_config, dict) else {})
+        self._config = ContinuityConfig.from_mapping(
+            raw_config if isinstance(raw_config, dict) else {}
+        )
         self._project = detect_project()
         self._store = ContinuityStore(data_dir / "continuity.db")
         self._store.migrate()
+        self._vector_backend = build_vector_backend(self._config, self._store)
+        index_records(self._vector_backend, self._store.list_records())
         self._initialized = True
 
     def system_prompt_block(self) -> str:
@@ -106,7 +116,7 @@ class ContinuityProvider(MemoryProvider):
         if not self._store or not query.strip():
             return ""
         effective_scope = scope_project or self._project_display_name()
-        hits = ContinuityRetriever(self._store).search(
+        hits = ContinuityRetriever(self._store, vector_backend=self._vector_backend).search(
             query,
             scope_project=effective_scope,
             limit=self._config.max_records,
@@ -121,7 +131,11 @@ class ContinuityProvider(MemoryProvider):
         self._store.log_retrieval_event(
             query=query,
             selected_ids=[hit.record.id for hit in included],
-            skipped_ids=[hit.record.id for hit in selected if hit.record.id not in {i.record.id for i in included}],
+            skipped_ids=[
+                hit.record.id
+                for hit in selected
+                if hit.record.id not in {i.record.id for i in included}
+            ],
             scores={hit.record.id: hit.score for hit in selected},
             max_chars=self._config.max_chars,
         )
@@ -158,7 +172,7 @@ class ContinuityProvider(MemoryProvider):
             scope_project=self._project_display_name(),
         )
         for record in records:
-            self._store.upsert_record(record)
+            self._upsert_record(record)
         self._update_project_capsule()
         self._store.mark_session_observations_consolidated(self._session_id)
 
@@ -189,24 +203,43 @@ class ContinuityProvider(MemoryProvider):
         _ = kwargs
         if tool_name == "continuity_status":
             return json.dumps(self._status_payload(), ensure_ascii=False)
-        if tool_name in {
-            "continuity_search",
-            "continuity_get",
-            "continuity_add",
-            "continuity_delete",
-        } and self._store is None:
+        if (
+            tool_name
+            in {
+                "continuity_search",
+                "continuity_get",
+                "continuity_add",
+                "continuity_delete",
+            }
+            and self._store is None
+        ):
             return json.dumps(
                 {"success": False, "error": "continuity provider is not initialized"},
                 ensure_ascii=False,
             )
         if tool_name == "continuity_search" and self._store is not None:
-            return json.dumps(handle_search(self._store, args), ensure_ascii=False)
+            return json.dumps(
+                handle_search(self._store, args, vector_backend=self._vector_backend),
+                ensure_ascii=False,
+            )
         if tool_name == "continuity_get" and self._store is not None:
             return json.dumps(handle_get(self._store, args), ensure_ascii=False)
         if tool_name == "continuity_add" and self._store is not None:
-            return json.dumps(handle_add(self._store, args), ensure_ascii=False)
+            payload = handle_add(self._store, args)
+            record = (
+                self._store.get_record(str(payload.get("record", {}).get("id", "")))
+                if payload.get("success")
+                else None
+            )
+            if record and self._vector_backend:
+                self._vector_backend.upsert(record.id, record.embedding_text or "")
+            return json.dumps(payload, ensure_ascii=False)
         if tool_name == "continuity_delete" and self._store is not None:
-            return json.dumps(handle_delete(self._store, args), ensure_ascii=False)
+            record_id = str(args.get("id") or "").strip()
+            payload = handle_delete(self._store, args)
+            if record_id and self._vector_backend:
+                self._vector_backend.delete(record_id)
+            return json.dumps(payload, ensure_ascii=False)
         return json.dumps(
             {
                 "success": False,
@@ -235,7 +268,10 @@ class ContinuityProvider(MemoryProvider):
             "max_records": self._config.max_records,
             "max_chars": self._config.max_chars,
             "vector_enabled": self._config.vector_enabled,
-            "phase": "phase-6-project-capsules",
+            "vector_backend": self._config.vector_backend,
+            "vector_available": bool(self._vector_backend and self._vector_backend.is_available()),
+            "vector_count": self._store.count_vectors() if self._store else 0,
+            "phase": "phase-7-vector-hybrid-retrieval",
         }
 
     def _project_display_name(self) -> str | None:
@@ -255,7 +291,14 @@ class ContinuityProvider(MemoryProvider):
         ]
         if not project_records:
             return
-        self._store.upsert_record(build_project_capsule(self._project, project_records))
+        self._upsert_record(build_project_capsule(self._project, project_records))
+
+    def _upsert_record(self, record: ContextRecord) -> None:
+        if not self._store:
+            return
+        self._store.upsert_record(record)
+        if self._vector_backend:
+            self._vector_backend.upsert(record.id, record.embedding_text or "")
 
 
 def _format_prefetch_context(

@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+from continuity.embeddings import VectorBackend
 from continuity.models import ContextRecord
 from continuity.store import ContinuityStore
 
@@ -14,6 +15,7 @@ ENTITY_BONUS = 1.75
 CONFIDENCE_WEIGHT = 0.75
 IMPORTANCE_WEIGHT = 0.75
 FTS_WEIGHT = 1.0
+VECTOR_WEIGHT = 3.0
 CAPSULE_SCOPE_BONUS = 4.0
 TRUST_PENALTIES = {
     "remote_untrusted": 1.0,
@@ -65,10 +67,13 @@ class RetrievalHit:
 
 
 class ContinuityRetriever:
-    """Hybrid FTS + metadata retriever for continuity records."""
+    """Hybrid FTS + metadata + optional vector retriever for continuity records."""
 
-    def __init__(self, store: ContinuityStore) -> None:
+    def __init__(
+        self, store: ContinuityStore, *, vector_backend: VectorBackend | None = None
+    ) -> None:
         self.store = store
+        self.vector_backend = vector_backend
 
     def search(
         self,
@@ -85,6 +90,24 @@ class ContinuityRetriever:
             base = max(0.0, 1.0 / (1.0 + abs(hit.rank))) * FTS_WEIGHT
             candidates[hit.record.id] = (hit.record, base, ["fts"])
 
+        if self.vector_backend and self.vector_backend.is_available():
+            for vector_hit in self.vector_backend.search(query, limit=max(limit * 4, 20)):
+                record = self.store.get_record(vector_hit.record_id)
+                if record is None:
+                    self.vector_backend.delete(vector_hit.record_id)
+                    continue
+                vector_score = max(0.0, vector_hit.score) * VECTOR_WEIGHT
+                existing = candidates.get(record.id)
+                if existing:
+                    _, current_score, reasons = existing
+                    candidates[record.id] = (
+                        record,
+                        current_score + vector_score,
+                        [*reasons, "vector"],
+                    )
+                elif vector_score > 0:
+                    candidates[record.id] = (record, vector_score, ["vector"])
+
         for record in self.store.list_records():
             metadata_score, metadata_reasons = _metadata_score(
                 record,
@@ -96,7 +119,11 @@ class ContinuityRetriever:
             existing = candidates.get(record.id)
             if existing:
                 _, current_score, reasons = existing
-                candidates[record.id] = (record, current_score + metadata_score, reasons + metadata_reasons)
+                candidates[record.id] = (
+                    record,
+                    current_score + metadata_score,
+                    reasons + metadata_reasons,
+                )
             else:
                 candidates[record.id] = (record, metadata_score, metadata_reasons)
 
