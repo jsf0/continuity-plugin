@@ -22,7 +22,7 @@ target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF", "N", "A", "C4", "PTH", "RET"]
-ignore = ["E501"]
+ignore = ["E501", "A002"]
 
 [tool.pytest.ini_options]
 addopts = "-ra --strict-markers --strict-config"

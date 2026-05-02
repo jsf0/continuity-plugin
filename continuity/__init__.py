@@ -11,6 +11,8 @@ import json
 from pathlib import Path
 from typing import Any, Protocol
 
+from continuity.store import ContinuityStore
+
 try:  # pragma: no cover - exercised when running inside Hermes Agent.
     from agent.memory_provider import MemoryProvider
 except ModuleNotFoundError:  # Standalone test/dev mode without Hermes on sys.path.
@@ -52,6 +54,7 @@ class ContinuityProvider(MemoryProvider):
         self._data_dir: Path | None = None
         self._platform = ""
         self._agent_context = ""
+        self._store: ContinuityStore | None = None
 
     @property
     def name(self) -> str:
@@ -73,6 +76,8 @@ class ContinuityProvider(MemoryProvider):
         self._data_dir = data_dir
         self._platform = str(kwargs.get("platform") or "")
         self._agent_context = str(kwargs.get("agent_context") or "")
+        self._store = ContinuityStore(data_dir / "continuity.db")
+        self._store.migrate()
         self._initialized = True
 
     def system_prompt_block(self) -> str:
@@ -144,7 +149,8 @@ class ContinuityProvider(MemoryProvider):
             "data_dir": str(self._data_dir) if self._data_dir else None,
             "platform": self._platform,
             "agent_context": self._agent_context,
-            "record_count": 0,
+            "record_count": self._store.count_records() if self._store else 0,
+            "db_path": str(self._store.db_path) if self._store else None,
             "vector_enabled": False,
             "phase": "phase-1-skeleton",
         }
