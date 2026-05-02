@@ -14,6 +14,7 @@ from typing import Any, Protocol
 from continuity.config import ContinuityConfig
 from continuity.embeddings import VectorBackend, build_vector_backend, index_records
 from continuity.extraction import extract_records_from_messages
+from continuity.memory_mirror import build_mirrored_memory_record, mirrored_memory_record_id
 from continuity.models import ContextRecord
 from continuity.project import ProjectContext, build_project_capsule, detect_project
 from continuity.retrieval import ContinuityRetriever, RetrievalHit
@@ -182,8 +183,26 @@ class ContinuityProvider(MemoryProvider):
         return ""
 
     def on_memory_write(self, action: str, target: str, content: str) -> None:
-        """No-op until built-in memory mirroring exists."""
-        _ = (action, target, content)
+        """Mirror high-signal built-in Hermes memory writes into continuity records."""
+        if not self._store:
+            return
+        normalized_action = action.strip().lower()
+        normalized_target = target.strip().lower()
+        if normalized_action == "remove":
+            record_id = mirrored_memory_record_id(normalized_target, content)
+            self._store.delete_record(record_id)
+            if self._vector_backend:
+                self._vector_backend.delete(record_id)
+            return
+        record = build_mirrored_memory_record(
+            action=normalized_action,
+            target=normalized_target,
+            content=content,
+            scope_project=self._project_display_name(),
+        )
+        if record is None:
+            return
+        self._upsert_record(record)
 
     def on_delegation(
         self,
@@ -271,7 +290,7 @@ class ContinuityProvider(MemoryProvider):
             "vector_backend": self._config.vector_backend,
             "vector_available": bool(self._vector_backend and self._vector_backend.is_available()),
             "vector_count": self._store.count_vectors() if self._store else 0,
-            "phase": "phase-7-vector-hybrid-retrieval",
+            "phase": "phase-7.5-memory-write-mirroring",
         }
 
     def _project_display_name(self) -> str | None:
