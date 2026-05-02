@@ -1,0 +1,4 @@
+name: continuity
+description: Local-first structured continuity memory with scoped retrieval for Hermes Agent.
+version: 0.1.0
+provider: memory

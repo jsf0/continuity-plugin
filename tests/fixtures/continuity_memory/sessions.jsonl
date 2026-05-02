@@ -1,0 +1,2 @@
+{"id":"s_trivial","messages":[{"role":"user","content":"hi"},{"role":"assistant","content":"hello"}],"expected_records":[]}
+{"id":"s_delegate_timeout","messages":[{"role":"user","content":"delegate_task timed out with api_calls:0 after 300s"},{"role":"assistant","content":"I worked inline after repeated delegation timeout."}],"expected_records":["r_delegate_timeout"]}
