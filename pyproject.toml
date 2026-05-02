@@ -4,6 +4,18 @@ version = "0.1.0"
 description = "Local-first structured continuity memory provider for Hermes Agent"
 readme = "README.md"
 requires-python = ">=3.11"
+license = "MIT"
+authors = [{ name = "Joseph" }]
+keywords = ["hermes-agent", "memory", "rag", "sqlite", "llm"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
 dependencies = []
 
 [dependency-groups]
@@ -15,6 +27,10 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["continuity"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"continuity/plugin.yaml" = "continuity/plugin.yaml"
+"continuity/py.typed" = "continuity/py.typed"
 
 [tool.ruff]
 line-length = 100
