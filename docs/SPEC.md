@@ -1018,6 +1018,197 @@ python -m pytest tests/test_vectors.py tests/test_hybrid_retrieval.py tests/test
 
 ---
 
+## Phase 7.5 — Built-in memory write mirroring
+
+**Goal:** Make high-signal Hermes built-in memory writes searchable in continuity without changing user behavior.
+
+Hermes built-in `MEMORY.md` / `USER.md` should remain tiny Tier 0 always-injected memory. This phase mirrors built-in memory writes into structured continuity records so the same curated facts can also be scoped, searched, source-backed, indexed, and included in project capsules.
+
+### Behavior
+
+Implement `ContinuityProvider.on_memory_write(action, target, content)`.
+
+Supported actions:
+
+- `add` — create or upsert a deterministic mirror record for `content`.
+- `remove` — delete the deterministic mirror record for `content` when possible.
+- `replace` — if only the new content is available, upsert the new mirror record and do not guess the old record id.
+
+Supported targets:
+
+- `user` — mirror as `user_preference` unless a conservative classifier can choose a better allowed kind.
+- `memory` — mirror as `environment_fact` unless a conservative classifier can choose `lesson_learned`, `decision`, or `project_convention`.
+
+Record requirements:
+
+- deterministic id from `target` + normalized sanitized content hash, e.g. `mirror_user_<hash>` or `mirror_memory_<hash>`.
+- `trust_level = built_in_memory_mirror`.
+- source ref: `SourceRef(type="built_in_memory", id=target, label=f"Hermes memory {action}")`.
+- `scope_project` should be current project display name when project context is available and content appears project-specific; global/user preferences may remain unscoped.
+- content must pass the same secret redaction / prompt-injection rejection path used for observations.
+- excessive content must be truncated before storage.
+- vector indexing must happen through the provider's normal record upsert path when vector mode is enabled.
+
+### Conservative classification rules
+
+Do not use an LLM for this phase. Use deterministic rules only.
+
+Suggested classifier:
+
+- target `user` + preference-like wording (`prefers`, `likes`, `wants`, `call them`, `timezone`) → `user_preference`.
+- target `memory` + `lesson`, `gotcha`, `pitfall`, `beware`, `workaround`, `quirk` → `lesson_learned`.
+- target `memory` + `decided`, `declined`, `chose`, `decision` → `decision`.
+- target `memory` + `uses`, `project`, `repo`, `convention`, `test`, `verify`, `build` → `project_convention` when project-scoped, otherwise `environment_fact`.
+- fallback: target `user` → `user_preference`; target `memory` → `environment_fact`.
+
+### Tasks
+
+1. Add deterministic mirror id helper and content normalization helper.
+2. Add conservative memory-write classifier.
+3. Implement `on_memory_write()` add/remove/replace behavior.
+4. Ensure mirrored records use source refs and `built_in_memory_mirror` trust.
+5. Route mirrored upserts through vector-aware provider helper.
+6. Update project capsule generation to naturally include mirrored project records.
+7. Add tests for add, remove, replace, classification, redaction, scope, retrieval, and vector indexing.
+8. Add `docs/PHASE7_5.md` documenting behavior and non-goals.
+
+### Definition of done
+
+- Built-in memory writes create searchable continuity records.
+- Removed built-in memory content deletes the matching mirrored record when deterministic id can be computed.
+- Mirrored records are source-backed as `built_in_memory`.
+- Mirroring does not duplicate skill contents or transcript blobs.
+- Secrets are redacted and obvious prompt-injection-like content is rejected.
+- FTS-only and vector-enabled modes both pass.
+- Existing retrieval and project capsule tests do not regress.
+
+### Testing
+
+```bash
+uv run ruff check .
+uv run pytest tests/test_memory_mirror_phase7_5.py tests/test_provider_phase7.py tests/test_project_capsule_phase6.py -q
+uv run pytest tests/ -q
+```
+
+---
+
+## Phase 7.6 — Skill links for continuity records
+
+**Goal:** Connect semantic continuity memories to procedural Hermes skills without copying skill contents into the memory store.
+
+A continuity memory captures what is true or what happened. A Hermes skill captures how to act. This phase lets a memory say "this skill was relevant to this memory" so retrieval can suggest procedural context when a remembered situation recurs.
+
+### Non-goals
+
+- Do not store skill bodies in SQLite.
+- Do not automatically load skills from the memory provider.
+- Do not build a general memory graph or broad memory-to-memory spreading activation system in this phase.
+- Do not persist weak embedding-similarity links between every related record.
+
+### Schema
+
+Add a sparse skill-link table:
+
+```sql
+CREATE TABLE IF NOT EXISTS context_record_skill_links (
+  record_id TEXT NOT NULL,
+  skill_name TEXT NOT NULL,
+  reason TEXT,
+  confidence REAL NOT NULL DEFAULT 0.5,
+  source TEXT NOT NULL DEFAULT 'agent_observed',
+  created_at TEXT NOT NULL,
+  last_used_at TEXT,
+  PRIMARY KEY(record_id, skill_name),
+  FOREIGN KEY(record_id) REFERENCES context_records(id) ON DELETE CASCADE
+);
+```
+
+`skill_name` should use canonical Hermes skill names such as:
+
+```text
+software-development/systematic-debugging
+devops/openbsd-rust-dev-loop
+github/github-pr-workflow
+```
+
+### Behavior
+
+- `continuity_add` may accept optional `skill_links`.
+- `continuity_get` returns skill links for the record.
+- `continuity_search` returns skill links for each result.
+- `prefetch()` may include at most 1–2 compact skill hints per selected memory, subject to the same prompt budget.
+- Skill hints should be informational, not instructions, e.g. `Related skills: devops/openbsd-rust-dev-loop`.
+- Skill links should be explicit or high-confidence only.
+
+### Link model
+
+Suggested `SkillLink` fields:
+
+```python
+@dataclass(frozen=True)
+class SkillLink:
+    record_id: str
+    skill_name: str
+    reason: str | None = None
+    confidence: float = 0.5
+    source: str = "agent_observed"
+    created_at: str = field(default_factory=utc_now)
+    last_used_at: str | None = None
+```
+
+Allowed `source` values should be constrained at the model layer, for example:
+
+```text
+explicit_user
+agent_observed
+session_extracted
+built_in_memory_mirror
+```
+
+### Tasks
+
+1. Add `SkillLink` model and validation.
+2. Add schema migration for `context_record_skill_links`.
+3. Add store methods: `upsert_skill_link()`, `delete_skill_link()`, `list_skill_links(record_id)`, and optional `replace_skill_links(record_id, links)`.
+4. Extend `continuity_add` to accept optional `skill_links` and persist them.
+5. Extend `continuity_get` and `continuity_search` responses with `skill_links`.
+6. Extend prefetch formatting with compact, budgeted `Related skills:` lines.
+7. Add tests for add/get/search/prefetch/delete cascade behavior.
+8. Add `docs/PHASE7_6.md` documenting skill-link semantics and non-goals.
+
+### Definition of done
+
+- Records can have zero or more explicit skill links.
+- Skill links are returned by inspection/search tools.
+- Prefetch can show compact related-skill hints without blowing budget.
+- Deleting a record removes its skill links.
+- No skill content is duplicated in continuity memory.
+- Existing memory retrieval behavior does not regress.
+
+### Future memory-to-memory links
+
+Memory-to-memory links are deferred. If added later, prefer a separate sparse edge table with explicit relation types such as `supports`, `supersedes`, `contradicts`, `duplicates`, `derived_from`, `follow_up`, and `resolved_by`.
+
+Do not persist weak similarity links by default. Similarity should usually remain a query-time retrieval/scoring concern.
+
+If a future phase adds relationship strength, use `strength` or `confidence` with strict caps such as:
+
+```text
+max_link_hops = 1
+min_link_strength = 0.7
+max_related_records = 2
+```
+
+### Testing
+
+```bash
+uv run ruff check .
+uv run pytest tests/test_skill_links_phase7_6.py tests/test_tools_phase4.py tests/test_prefetch_phase3.py -q
+uv run pytest tests/ -q
+```
+
+---
+
 ## Phase 8 — Packaging, documentation, and release
 
 **Goal:** Make this usable as a GitHub plugin, not a local hack.
