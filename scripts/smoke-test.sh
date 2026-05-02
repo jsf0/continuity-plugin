@@ -31,14 +31,11 @@ hermes_agent = Path.home() / ".hermes" / "hermes-agent"
 provider = None
 if hermes_agent.exists():
     sys.path.insert(0, str(hermes_agent))
-    try:
-        from plugins.memory import load_memory_provider
+    from plugins.memory import load_memory_provider
 
-        provider = load_memory_provider("continuity")
-    except Exception:
-        provider = None
-
-if provider is None:
+    provider = load_memory_provider("continuity")
+    assert provider is not None, "Hermes memory loader could not load installed continuity plugin"
+else:
     sys.path.insert(0, str(ROOT))
     from continuity import ContinuityProvider
 

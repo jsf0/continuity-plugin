@@ -15,8 +15,8 @@ import re
 from dataclasses import dataclass
 from typing import Protocol
 
-from continuity.models import ContextRecord, utc_now
-from continuity.store import ContinuityStore
+from .models import ContextRecord, utc_now
+from .store import ContinuityStore
 
 DEFAULT_DIMENSIONS = 64
 VECTOR_BACKENDS = frozenset({"sqlite-hash", "hash", "sqlite-json"})

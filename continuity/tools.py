@@ -5,10 +5,10 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
-from continuity.embeddings import VectorBackend
-from continuity.models import ContextRecord, SkillLink, SourceRef
-from continuity.retrieval import ContinuityRetriever, RetrievalHit
-from continuity.store import ContinuityStore
+from .embeddings import VectorBackend
+from .models import ContextRecord, SkillLink, SourceRef
+from .retrieval import ContinuityRetriever, RetrievalHit
+from .store import ContinuityStore
 
 CONTINUITY_STATUS_SCHEMA: dict[str, object] = {
     "name": "continuity_status",

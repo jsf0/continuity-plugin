@@ -11,22 +11,22 @@ import json
 from pathlib import Path
 from typing import Any, Protocol
 
-from continuity.config import ContinuityConfig
-from continuity.embeddings import VectorBackend, build_vector_backend, index_records
-from continuity.extraction import extract_records_from_messages
-from continuity.memory_mirror import build_mirrored_memory_record, mirrored_memory_record_id
-from continuity.models import ContextRecord
-from continuity.project import ProjectContext, build_project_capsule, detect_project
-from continuity.retrieval import ContinuityRetriever, RetrievalHit
-from continuity.store import ContinuityStore
-from continuity.tools import (
+from .config import ContinuityConfig
+from .embeddings import VectorBackend, build_vector_backend, index_records
+from .extraction import extract_records_from_messages
+from .memory_mirror import build_mirrored_memory_record, mirrored_memory_record_id
+from .models import ContextRecord
+from .project import ProjectContext, build_project_capsule, detect_project
+from .retrieval import ContinuityRetriever, RetrievalHit
+from .store import ContinuityStore
+from .tools import (
     ALL_TOOL_SCHEMAS,
     handle_add,
     handle_delete,
     handle_get,
     handle_search,
 )
-from continuity.tools import (
+from .tools import (
     CONTINUITY_STATUS_SCHEMA as CONTINUITY_STATUS_SCHEMA,
 )
 

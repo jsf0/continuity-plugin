@@ -6,8 +6,8 @@ import hashlib
 import re
 from collections.abc import Iterable
 
-from continuity.models import ContextRecord, SourceRef
-from continuity.security import is_safe_memory_text
+from .models import ContextRecord, SourceRef
+from .security import is_safe_memory_text
 
 _PREFIX_PATTERNS = [
     (re.compile(r"\bremember\s*:\s*(.+)", re.IGNORECASE), "user_preference"),

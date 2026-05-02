@@ -8,8 +8,8 @@ import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
-from continuity.models import ContextRecord, SkillLink, SourceRef, utc_now
-from continuity.security import sanitize_observation_text
+from .models import ContextRecord, SkillLink, SourceRef, utc_now
+from .security import sanitize_observation_text
 
 SCHEMA_VERSION = 3
 

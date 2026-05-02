@@ -5,9 +5,9 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from continuity.embeddings import VectorBackend
-from continuity.models import ContextRecord, SkillLink
-from continuity.store import ContinuityStore
+from .embeddings import VectorBackend
+from .models import ContextRecord, SkillLink
+from .store import ContinuityStore
 
 SCOPE_BONUS = 2.0
 TAG_BONUS = 1.5

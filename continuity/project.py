@@ -8,7 +8,7 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-from continuity.models import ContextRecord, SourceRef
+from .models import ContextRecord, SourceRef
 
 
 @dataclass(frozen=True)

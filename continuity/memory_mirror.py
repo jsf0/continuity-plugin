@@ -5,8 +5,8 @@ from __future__ import annotations
 import hashlib
 import re
 
-from continuity.models import ContextRecord, SourceRef, utc_now
-from continuity.security import is_safe_memory_text, redact_sensitive_text, truncate_text
+from .models import ContextRecord, SourceRef, utc_now
+from .security import is_safe_memory_text, redact_sensitive_text, truncate_text
 
 MIRROR_MAX_CHARS = 1200
 
