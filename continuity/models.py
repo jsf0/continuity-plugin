@@ -32,10 +32,62 @@ ALLOWED_TRUST_LEVELS = frozenset(
     }
 )
 
+ALLOWED_SKILL_LINK_SOURCES = frozenset(
+    {
+        "explicit_user",
+        "agent_observed",
+        "session_extracted",
+        "built_in_memory_mirror",
+    }
+)
+
 
 def utc_now() -> str:
     """Return an ISO-8601 UTC timestamp."""
     return datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+@dataclass(frozen=True)
+class SkillLink:
+    """Reference from a continuity memory record to a relevant Hermes skill."""
+
+    record_id: str
+    skill_name: str
+    reason: str | None = None
+    confidence: float = 0.5
+    source: str = "agent_observed"
+    created_at: str = field(default_factory=utc_now)
+    last_used_at: str | None = None
+
+    def __post_init__(self) -> None:
+        _validate_non_empty("record_id", self.record_id)
+        _validate_non_empty("skill_name", self.skill_name)
+        _validate_probability("confidence", self.confidence)
+        if self.source not in ALLOWED_SKILL_LINK_SOURCES:
+            raise ValueError(f"source must be one of {sorted(ALLOWED_SKILL_LINK_SOURCES)}")
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "record_id": self.record_id,
+            "skill_name": self.skill_name,
+            "reason": self.reason,
+            "confidence": self.confidence,
+            "source": self.source,
+            "created_at": self.created_at,
+            "last_used_at": self.last_used_at,
+        }
+
+    @classmethod
+    def from_dict(cls, value: dict[str, object]) -> SkillLink:
+        return cls(
+            record_id=str(value.get("record_id") or ""),
+            skill_name=str(value.get("skill_name") or ""),
+            reason=_optional_str(value.get("reason")),
+            confidence=float(value.get("confidence", 0.5)),
+            source=str(value.get("source") or "agent_observed"),
+            created_at=str(value.get("created_at") or utc_now()),
+            last_used_at=_optional_str(value.get("last_used_at")),
+        )
 
 
 @dataclass(frozen=True)

@@ -290,7 +290,7 @@ class ContinuityProvider(MemoryProvider):
             "vector_backend": self._config.vector_backend,
             "vector_available": bool(self._vector_backend and self._vector_backend.is_available()),
             "vector_count": self._store.count_vectors() if self._store else 0,
-            "phase": "phase-7.5-memory-write-mirroring",
+            "phase": "phase-7.6-skill-links",
         }
 
     def _project_display_name(self) -> str | None:
@@ -357,11 +357,20 @@ def _format_hit(
     if include_scores:
         meta_parts.append(f"score={hit.score:.2f}")
     lines = [f"{index}. [{' | '.join(meta_parts)}]", f"   {record.summary}"]
+    related_skills = _format_related_skills(hit)
+    if related_skills:
+        lines.append(f"   Related skills: {related_skills}")
     if include_sources and record.sources:
         source_text = "; ".join(_format_source(source) for source in record.sources)
         if source_text:
             lines.append(f"   Sources: {source_text}")
     return lines
+
+
+def _format_related_skills(hit: RetrievalHit) -> str:
+    if not hit.skill_links:
+        return ""
+    return ", ".join(link.skill_name for link in hit.skill_links[:1])
 
 
 def _format_source(source: object) -> str:

@@ -8,10 +8,10 @@ import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
-from continuity.models import ContextRecord, SourceRef, utc_now
+from continuity.models import ContextRecord, SkillLink, SourceRef, utc_now
 from continuity.security import sanitize_observation_text
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 @dataclass(frozen=True)
@@ -107,11 +107,27 @@ class ContinuityStore:
                   PRIMARY KEY(record_id, model),
                   FOREIGN KEY(record_id) REFERENCES context_records(id) ON DELETE CASCADE
                 );
+
+                CREATE TABLE IF NOT EXISTS context_record_skill_links (
+                  record_id TEXT NOT NULL,
+                  skill_name TEXT NOT NULL,
+                  reason TEXT,
+                  confidence REAL NOT NULL DEFAULT 0.5,
+                  source TEXT NOT NULL DEFAULT 'agent_observed',
+                  created_at TEXT NOT NULL,
+                  last_used_at TEXT,
+                  PRIMARY KEY(record_id, skill_name),
+                  FOREIGN KEY(record_id) REFERENCES context_records(id) ON DELETE CASCADE
+                );
                 """
             )
             conn.execute(
                 "INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)",
                 (1, utc_now()),
+            )
+            conn.execute(
+                "INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)",
+                (2, utc_now()),
             )
             conn.execute(
                 "INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)",
@@ -183,6 +199,62 @@ class ContinuityStore:
             conn.execute("DELETE FROM context_records WHERE id = ?", (record_id,))
             conn.execute("DELETE FROM context_records_fts WHERE id = ?", (record_id,))
             conn.execute("DELETE FROM context_record_vectors WHERE record_id = ?", (record_id,))
+            conn.execute("DELETE FROM context_record_skill_links WHERE record_id = ?", (record_id,))
+
+    def upsert_skill_link(self, link: SkillLink) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO context_record_skill_links(
+                  record_id, skill_name, reason, confidence, source, created_at, last_used_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(record_id, skill_name) DO UPDATE SET
+                  reason=excluded.reason,
+                  confidence=excluded.confidence,
+                  source=excluded.source,
+                  created_at=excluded.created_at,
+                  last_used_at=excluded.last_used_at
+                """,
+                _skill_link_row(link),
+            )
+
+    def list_skill_links(self, record_id: str) -> list[SkillLink]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM context_record_skill_links
+                WHERE record_id = ?
+                ORDER BY confidence DESC, skill_name
+                """,
+                (record_id,),
+            ).fetchall()
+        return [_skill_link_from_row(row) for row in rows]
+
+    def replace_skill_links(self, record_id: str, links: list[SkillLink]) -> None:
+        with self.connect() as conn:
+            conn.execute("DELETE FROM context_record_skill_links WHERE record_id = ?", (record_id,))
+            for link in links:
+                conn.execute(
+                    """
+                    INSERT INTO context_record_skill_links(
+                      record_id, skill_name, reason, confidence, source, created_at, last_used_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(record_id, skill_name) DO UPDATE SET
+                      reason=excluded.reason,
+                      confidence=excluded.confidence,
+                      source=excluded.source,
+                      created_at=excluded.created_at,
+                      last_used_at=excluded.last_used_at
+                    """,
+                    _skill_link_row(link),
+                )
+
+    def delete_skill_link(self, record_id: str, skill_name: str) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                "DELETE FROM context_record_skill_links WHERE record_id = ? AND skill_name = ?",
+                (record_id, skill_name),
+            )
 
     def upsert_vector(
         self,
@@ -416,6 +488,32 @@ def _record_from_row(row: sqlite3.Row) -> ContextRecord:
             "expires_at": row["expires_at"],
             "source_hash": row["source_hash"],
             "embedding_text": row["embedding_text"],
+        }
+    )
+
+
+def _skill_link_row(link: SkillLink) -> tuple[object, ...]:
+    return (
+        link.record_id,
+        link.skill_name,
+        link.reason,
+        link.confidence,
+        link.source,
+        link.created_at,
+        link.last_used_at,
+    )
+
+
+def _skill_link_from_row(row: sqlite3.Row) -> SkillLink:
+    return SkillLink.from_dict(
+        {
+            "record_id": row["record_id"],
+            "skill_name": row["skill_name"],
+            "reason": row["reason"],
+            "confidence": row["confidence"],
+            "source": row["source"],
+            "created_at": row["created_at"],
+            "last_used_at": row["last_used_at"],
         }
     )
 

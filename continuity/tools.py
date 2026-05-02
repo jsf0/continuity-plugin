@@ -6,7 +6,7 @@ import uuid
 from typing import Any
 
 from continuity.embeddings import VectorBackend
-from continuity.models import ContextRecord, SourceRef
+from continuity.models import ContextRecord, SkillLink, SourceRef
 from continuity.retrieval import ContinuityRetriever, RetrievalHit
 from continuity.store import ContinuityStore
 
@@ -68,6 +68,11 @@ CONTINUITY_ADD_SCHEMA: dict[str, object] = {
             "confidence": {"type": "number"},
             "importance": {"type": "number"},
             "trust_level": {"type": "string"},
+            "skill_links": {
+                "type": "array",
+                "description": "Optional links to relevant Hermes skills; skill bodies are not stored.",
+                "items": {"type": "object"},
+            },
         },
         "required": ["kind", "title", "summary"],
     },
@@ -122,7 +127,11 @@ def handle_get(store: ContinuityStore, args: dict[str, Any]) -> dict[str, object
     record = store.get_record(record_id)
     if record is None:
         return {"success": False, "error": f"record not found: {record_id}"}
-    return {"success": True, "record": record.to_dict()}
+    return {
+        "success": True,
+        "record": record.to_dict(),
+        "skill_links": [link.to_dict() for link in store.list_skill_links(record.id)],
+    }
 
 
 def handle_add(store: ContinuityStore, args: dict[str, Any]) -> dict[str, object]:
@@ -151,8 +160,17 @@ def handle_add(store: ContinuityStore, args: dict[str, Any]) -> dict[str, object
         )
     except (TypeError, ValueError) as exc:
         return {"success": False, "error": str(exc)}
+    try:
+        skill_links = _skill_links(record.id, args.get("skill_links"))
+    except (TypeError, ValueError) as exc:
+        return {"success": False, "error": str(exc)}
     store.upsert_record(record)
-    return {"success": True, "record": record.to_dict()}
+    store.replace_skill_links(record.id, skill_links)
+    return {
+        "success": True,
+        "record": record.to_dict(),
+        "skill_links": [link.to_dict() for link in skill_links],
+    }
 
 
 def handle_delete(store: ContinuityStore, args: dict[str, Any]) -> dict[str, object]:
@@ -175,7 +193,23 @@ def _hit_to_dict(hit: RetrievalHit) -> dict[str, object]:
         "score": hit.score,
         "reasons": list(hit.reasons),
         "sources": [source.to_dict() for source in record.sources],
+        "skill_links": [link.to_dict() for link in hit.skill_links],
     }
+
+
+def _skill_links(record_id: str, value: object) -> list[SkillLink]:
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise ValueError("expected list of skill link objects")
+    links: list[SkillLink] = []
+    for item in value:
+        if not isinstance(item, dict):
+            raise ValueError("expected list of skill link objects")
+        data = dict(item)
+        data["record_id"] = record_id
+        links.append(SkillLink.from_dict(data))
+    return links
 
 
 def _bounded_int(value: object, *, default: int, minimum: int, maximum: int) -> int:

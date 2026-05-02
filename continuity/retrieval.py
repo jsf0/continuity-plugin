@@ -6,7 +6,7 @@ import re
 from dataclasses import dataclass
 
 from continuity.embeddings import VectorBackend
-from continuity.models import ContextRecord
+from continuity.models import ContextRecord, SkillLink
 from continuity.store import ContinuityStore
 
 SCOPE_BONUS = 2.0
@@ -64,6 +64,7 @@ class RetrievalHit:
     record: ContextRecord
     score: float
     reasons: tuple[str, ...]
+    skill_links: tuple[SkillLink, ...] = ()
 
 
 class ContinuityRetriever:
@@ -128,7 +129,12 @@ class ContinuityRetriever:
                 candidates[record.id] = (record, metadata_score, metadata_reasons)
 
         hits = [
-            RetrievalHit(record=record, score=score, reasons=tuple(reasons))
+            RetrievalHit(
+                record=record,
+                score=score,
+                reasons=tuple(reasons),
+                skill_links=tuple(self.store.list_skill_links(record.id)),
+            )
             for record, score, reasons in candidates.values()
             if score > 0
         ]
