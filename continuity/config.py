@@ -23,6 +23,7 @@ class ContinuityConfig:
     session_strategy: str = "per-repo"
     project_scope_boost: float = 1.0
     stale_after_days: int = 180
+    observation_max_chars: int = 4000
     vector_enabled: bool = False
     vector_backend: str = "none"
     embedding_model: str | None = None
@@ -46,6 +47,7 @@ class ContinuityConfig:
             session_strategy=strategy,
             project_scope_boost=max(0.0, _float(data.get("project_scope_boost"), 1.0)),
             stale_after_days=max(1, _int(data.get("stale_after_days"), 180)),
+            observation_max_chars=max(200, _int(data.get("observation_max_chars"), 4000)),
             vector_enabled=_bool(vector.get("enabled"), False),
             vector_backend=str(vector.get("backend") or "none"),
             embedding_model=_optional_str(vector.get("embedding_model")),

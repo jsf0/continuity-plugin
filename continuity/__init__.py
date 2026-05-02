@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from continuity.config import ContinuityConfig
+from continuity.extraction import extract_records_from_messages
 from continuity.project import ProjectContext, detect_project
 from continuity.retrieval import ContinuityRetriever, RetrievalHit
 from continuity.store import ContinuityStore
@@ -60,6 +61,7 @@ class ContinuityProvider(MemoryProvider):
         self._store: ContinuityStore | None = None
         self._config = ContinuityConfig()
         self._project: ProjectContext | None = None
+        self._turn_index = 0
 
     @property
     def name(self) -> str:
@@ -130,12 +132,34 @@ class ContinuityProvider(MemoryProvider):
         _ = (query, session_id)
 
     def sync_turn(self, user_content: str, assistant_content: str, *, session_id: str = "") -> None:
-        """No-op until session observation storage exists."""
-        _ = (user_content, assistant_content, session_id)
+        """Persist a lightweight per-turn observation for later consolidation."""
+        if not self._store or not self._config.save_turn_observations:
+            return
+        effective_session_id = session_id or self._session_id
+        self._turn_index += 1
+        self._store.add_session_observation(
+            session_id=effective_session_id,
+            turn_index=self._turn_index,
+            user_content=user_content,
+            assistant_content=assistant_content,
+            max_chars=self._config.observation_max_chars,
+        )
 
     def on_session_end(self, messages: list[dict[str, Any]]) -> None:
-        """No-op until session consolidation exists."""
-        _ = messages
+        """Consolidate clear durable memories at session boundaries."""
+        if not self._store or not self._config.consolidate_on_session_end:
+            return
+        user_turns = sum(1 for message in messages if message.get("role") == "user")
+        if user_turns < self._config.consolidate_min_turns:
+            return
+        records = extract_records_from_messages(
+            session_id=self._session_id,
+            messages=messages,
+            scope_project=self._project_display_name(),
+        )
+        for record in records:
+            self._store.upsert_record(record)
+        self._store.mark_session_observations_consolidated(self._session_id)
 
     def on_pre_compress(self, messages: list[dict[str, Any]]) -> str:
         """No-op until pre-compression extraction exists."""
@@ -210,7 +234,7 @@ class ContinuityProvider(MemoryProvider):
             "max_records": self._config.max_records,
             "max_chars": self._config.max_chars,
             "vector_enabled": self._config.vector_enabled,
-            "phase": "phase-3-prefetch-baseline",
+            "phase": "phase-5-session-consolidation",
         }
 
     def _project_display_name(self) -> str | None:

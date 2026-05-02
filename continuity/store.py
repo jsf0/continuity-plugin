@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from continuity.models import ContextRecord, SourceRef, utc_now
+from continuity.security import sanitize_observation_text
 
 SCHEMA_VERSION = 1
 
@@ -217,6 +218,51 @@ class ContinuityStore:
                 "SELECT * FROM retrieval_events ORDER BY created_at DESC, rowid DESC LIMIT 1"
             ).fetchone()
         return dict(row) if row else None
+
+    def add_session_observation(
+        self,
+        *,
+        session_id: str,
+        turn_index: int,
+        user_content: str,
+        assistant_content: str,
+        max_chars: int,
+    ) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO session_observations(
+                  id, session_id, turn_index, user_content, assistant_content, created_at, consolidated
+                ) VALUES (?, ?, ?, ?, ?, ?, 0)
+                """,
+                (
+                    uuid.uuid4().hex,
+                    session_id,
+                    turn_index,
+                    sanitize_observation_text(user_content, max_chars=max_chars),
+                    sanitize_observation_text(assistant_content, max_chars=max_chars),
+                    utc_now(),
+                ),
+            )
+
+    def list_unconsolidated_observations(self, session_id: str) -> list[dict[str, object]]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM session_observations
+                WHERE session_id = ? AND consolidated = 0
+                ORDER BY turn_index, created_at
+                """,
+                (session_id,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def mark_session_observations_consolidated(self, session_id: str) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                "UPDATE session_observations SET consolidated = 1 WHERE session_id = ?",
+                (session_id,),
+            )
 
     def _replace_fts_row(self, conn: sqlite3.Connection, record: ContextRecord) -> None:
         conn.execute("DELETE FROM context_records_fts WHERE id = ?", (record.id,))
