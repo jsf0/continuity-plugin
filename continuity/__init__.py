@@ -15,6 +15,16 @@ from continuity.config import ContinuityConfig
 from continuity.project import ProjectContext, detect_project
 from continuity.retrieval import ContinuityRetriever, RetrievalHit
 from continuity.store import ContinuityStore
+from continuity.tools import (
+    ALL_TOOL_SCHEMAS,
+    handle_add,
+    handle_delete,
+    handle_get,
+    handle_search,
+)
+from continuity.tools import (
+    CONTINUITY_STATUS_SCHEMA as CONTINUITY_STATUS_SCHEMA,
+)
 
 try:  # pragma: no cover - exercised when running inside Hermes Agent.
     from agent.memory_provider import MemoryProvider
@@ -27,16 +37,6 @@ except ModuleNotFoundError:  # Standalone test/dev mode without Hermes on sys.pa
         fallback keeps the standalone GitHub plugin testable before installation.
         """
 
-
-CONTINUITY_STATUS_SCHEMA: dict[str, object] = {
-    "name": "continuity_status",
-    "description": "Show status for the local continuity memory provider.",
-    "parameters": {
-        "type": "object",
-        "properties": {},
-        "required": [],
-    },
-}
 
 
 class _RegistrationContext(Protocol):
@@ -158,12 +158,30 @@ class ContinuityProvider(MemoryProvider):
         _ = (task, result, child_session_id, kwargs)
 
     def get_tool_schemas(self) -> list[dict[str, object]]:
-        return [CONTINUITY_STATUS_SCHEMA]
+        return ALL_TOOL_SCHEMAS
 
     def handle_tool_call(self, tool_name: str, args: dict[str, Any], **kwargs: object) -> str:
-        _ = (args, kwargs)
+        _ = kwargs
         if tool_name == "continuity_status":
             return json.dumps(self._status_payload(), ensure_ascii=False)
+        if tool_name in {
+            "continuity_search",
+            "continuity_get",
+            "continuity_add",
+            "continuity_delete",
+        } and self._store is None:
+            return json.dumps(
+                {"success": False, "error": "continuity provider is not initialized"},
+                ensure_ascii=False,
+            )
+        if tool_name == "continuity_search" and self._store is not None:
+            return json.dumps(handle_search(self._store, args), ensure_ascii=False)
+        if tool_name == "continuity_get" and self._store is not None:
+            return json.dumps(handle_get(self._store, args), ensure_ascii=False)
+        if tool_name == "continuity_add" and self._store is not None:
+            return json.dumps(handle_add(self._store, args), ensure_ascii=False)
+        if tool_name == "continuity_delete" and self._store is not None:
+            return json.dumps(handle_delete(self._store, args), ensure_ascii=False)
         return json.dumps(
             {
                 "success": False,

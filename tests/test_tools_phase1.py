@@ -12,9 +12,16 @@ def test_status_tool_schema_is_openai_function_shape() -> None:
     assert schema["parameters"]["required"] == []
 
 
-def test_provider_exposes_only_status_tool_in_phase1() -> None:
+def test_provider_exposes_phase4_tool_schemas() -> None:
     provider = ContinuityProvider()
 
-    schemas = provider.get_tool_schemas()
+    names = {schema["name"] for schema in provider.get_tool_schemas()}
 
-    assert schemas == [CONTINUITY_STATUS_SCHEMA]
+    assert CONTINUITY_STATUS_SCHEMA in provider.get_tool_schemas()
+    assert names == {
+        "continuity_status",
+        "continuity_search",
+        "continuity_get",
+        "continuity_add",
+        "continuity_delete",
+    }
