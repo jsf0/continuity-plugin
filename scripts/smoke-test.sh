@@ -95,7 +95,7 @@ assert mirrored["success"] is True, mirrored
 assert any(result["id"].startswith("mirror_memory_") for result in mirrored["results"]), mirrored
 
 status = json.loads(provider.handle_tool_call("continuity_status", {}))
-assert status["phase"] == "phase-8.5-stale-memory-lifecycle", status
+assert status["phase"] == "phase-9-continuity-exclusive", status
 assert status["record_count"] >= 2, status
 assert status["vector_available"] is True, status
 

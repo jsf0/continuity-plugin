@@ -2,11 +2,22 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 VALID_SESSION_STRATEGIES = frozenset({"per-repo", "per-directory", "global", "per-session"})
 VALID_VECTOR_BACKENDS = frozenset({"none", "sqlite-hash", "hash", "sqlite-json"})
+
+
+@dataclass(frozen=True)
+class PinnedSystemPromptConfig:
+    """Configuration for continuity records pinned into the system prompt."""
+
+    enabled: bool = False
+    max_chars: int = 1200
+    max_records: int = 5
+    kinds: tuple[str, ...] = ("user_preference", "project_convention")
+    min_importance: float = 0.75
 
 
 @dataclass(frozen=True)
@@ -28,11 +39,17 @@ class ContinuityConfig:
     vector_enabled: bool = False
     vector_backend: str = "none"
     embedding_model: str | None = None
+    pinned_system_prompt: PinnedSystemPromptConfig = field(default_factory=PinnedSystemPromptConfig)
 
     @classmethod
     def from_mapping(cls, value: dict[str, Any] | None) -> ContinuityConfig:
         data = value or {}
         vector = data.get("vector") if isinstance(data.get("vector"), dict) else {}
+        pinned = (
+            data.get("pinned_system_prompt")
+            if isinstance(data.get("pinned_system_prompt"), dict)
+            else {}
+        )
         strategy = str(data.get("session_strategy") or "per-repo")
         if strategy not in VALID_SESSION_STRATEGIES:
             strategy = "per-repo"
@@ -55,6 +72,14 @@ class ContinuityConfig:
             vector_enabled=_bool(vector.get("enabled"), False),
             vector_backend=vector_backend,
             embedding_model=_optional_str(vector.get("embedding_model")),
+            pinned_system_prompt=PinnedSystemPromptConfig(
+                enabled=_bool(pinned.get("enabled"), False),
+                max_chars=max(200, _int(pinned.get("max_chars"), 1200)),
+                max_records=max(1, _int(pinned.get("max_records"), 5)),
+                kinds=tuple(_string_list(pinned.get("kinds")))
+                or ("user_preference", "project_convention"),
+                min_importance=min(1.0, max(0.0, _float(pinned.get("min_importance"), 0.75))),
+            ),
         )
 
 
@@ -87,3 +112,11 @@ def _optional_str(value: object) -> str | None:
         return None
     text = str(value).strip()
     return text or None
+
+
+def _string_list(value: object) -> list[str]:
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        return []
+    return [str(item).strip() for item in value if str(item).strip()]
