@@ -11,7 +11,7 @@ from pathlib import Path
 from .models import ContextRecord, SkillLink, SourceRef, utc_now
 from .security import sanitize_observation_text
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 
 @dataclass(frozen=True)
@@ -65,7 +65,11 @@ class ContinuityStore:
                   last_confirmed_at TEXT,
                   expires_at TEXT,
                   source_hash TEXT,
-                  embedding_text TEXT
+                  embedding_text TEXT,
+                  status TEXT NOT NULL DEFAULT 'active',
+                  superseded_by TEXT,
+                  stale_reason TEXT,
+                  archived_at TEXT
                 );
 
                 CREATE VIRTUAL TABLE IF NOT EXISTS context_records_fts USING fts5(
@@ -121,6 +125,15 @@ class ContinuityStore:
                 );
                 """
             )
+            _ensure_context_record_columns(
+                conn,
+                {
+                    "status": "TEXT NOT NULL DEFAULT 'active'",
+                    "superseded_by": "TEXT",
+                    "stale_reason": "TEXT",
+                    "archived_at": "TEXT",
+                },
+            )
             conn.execute(
                 "INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)",
                 (1, utc_now()),
@@ -128,6 +141,10 @@ class ContinuityStore:
             conn.execute(
                 "INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)",
                 (2, utc_now()),
+            )
+            conn.execute(
+                "INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)",
+                (3, utc_now()),
             )
             conn.execute(
                 "INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)",
@@ -148,8 +165,8 @@ class ContinuityStore:
                   title, summary, details, tags_json, entities_json, sources_json,
                   confidence, importance, trust_level, created_at, updated_at,
                   last_accessed_at, last_confirmed_at, expires_at, source_hash,
-                  embedding_text
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                  embedding_text, status, superseded_by, stale_reason, archived_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                   kind=excluded.kind,
                   scope_user=excluded.scope_user,
@@ -171,7 +188,11 @@ class ContinuityStore:
                   last_confirmed_at=excluded.last_confirmed_at,
                   expires_at=excluded.expires_at,
                   source_hash=excluded.source_hash,
-                  embedding_text=excluded.embedding_text
+                  embedding_text=excluded.embedding_text,
+                  status=excluded.status,
+                  superseded_by=excluded.superseded_by,
+                  stale_reason=excluded.stale_reason,
+                  archived_at=excluded.archived_at
                 """,
                 _record_row(record),
             )
@@ -200,6 +221,49 @@ class ContinuityStore:
             conn.execute("DELETE FROM context_records_fts WHERE id = ?", (record_id,))
             conn.execute("DELETE FROM context_record_vectors WHERE record_id = ?", (record_id,))
             conn.execute("DELETE FROM context_record_skill_links WHERE record_id = ?", (record_id,))
+
+    def archive_record(
+        self, record_id: str, *, reason: str | None = None, superseded_by: str | None = None
+    ) -> bool:
+        now = utc_now()
+        with self.connect() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE context_records
+                SET status = 'archived', stale_reason = ?, superseded_by = ?, archived_at = ?,
+                    updated_at = ?
+                WHERE id = ?
+                """,
+                (reason, superseded_by, now, now, record_id),
+            )
+        return cursor.rowcount > 0
+
+    def restore_record(self, record_id: str) -> bool:
+        now = utc_now()
+        with self.connect() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE context_records
+                SET status = 'active', stale_reason = NULL, superseded_by = NULL,
+                    archived_at = NULL, updated_at = ?
+                WHERE id = ?
+                """,
+                (now, record_id),
+            )
+        return cursor.rowcount > 0
+
+    def retract_record(self, record_id: str, *, reason: str | None = None) -> bool:
+        now = utc_now()
+        with self.connect() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE context_records
+                SET status = 'retracted', stale_reason = ?, archived_at = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (reason, now, now, record_id),
+            )
+        return cursor.rowcount > 0
 
     def upsert_skill_link(self, link: SkillLink) -> None:
         with self.connect() as conn:
@@ -434,6 +498,15 @@ class ContinuityStore:
         )
 
 
+def _ensure_context_record_columns(conn: sqlite3.Connection, columns: dict[str, str]) -> None:
+    existing = {
+        str(row["name"]) for row in conn.execute("PRAGMA table_info(context_records)").fetchall()
+    }
+    for name, definition in columns.items():
+        if name not in existing:
+            conn.execute(f"ALTER TABLE context_records ADD COLUMN {name} {definition}")
+
+
 def _record_row(record: ContextRecord) -> tuple[object, ...]:
     return (
         record.id,
@@ -458,6 +531,10 @@ def _record_row(record: ContextRecord) -> tuple[object, ...]:
         record.expires_at,
         record.source_hash,
         record.embedding_text,
+        record.status,
+        record.superseded_by,
+        record.stale_reason,
+        record.archived_at,
     )
 
 
@@ -488,6 +565,10 @@ def _record_from_row(row: sqlite3.Row) -> ContextRecord:
             "expires_at": row["expires_at"],
             "source_hash": row["source_hash"],
             "embedding_text": row["embedding_text"],
+            "status": row["status"],
+            "superseded_by": row["superseded_by"],
+            "stale_reason": row["stale_reason"],
+            "archived_at": row["archived_at"],
         }
     )
 

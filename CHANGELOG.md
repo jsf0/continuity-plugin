@@ -16,12 +16,17 @@ behavior while the provider API is still stabilizing.
 - SQLite FTS5 retrieval and deterministic metadata scoring.
 - Budgeted `prefetch()` output with retrieval event logging.
 - Tool surface: `continuity_status`, `continuity_search`, `continuity_get`,
-  `continuity_add`, and `continuity_delete`.
+  `continuity_add`, `continuity_delete`, `continuity_archive`,
+  `continuity_restore`, and `continuity_prune_stale`.
 - Session observation storage and conservative marker-based extraction.
 - Project capsules for active project state.
 - Optional dependency-free SQLite hashed vector backend.
 - Built-in Hermes memory write mirroring via `on_memory_write()`.
 - Skill links from continuity records to relevant Hermes skill names.
+- Stale-memory lifecycle fields (`status`, `superseded_by`, `stale_reason`,
+  `archived_at`) with archive/restore and conservative stale-prune tooling.
+- Retrieval excludes archived, retracted, and expired records by default while
+  allowing explicit `include_stale` inspection.
 - Install, smoke-test, release, troubleshooting, and configuration docs.
 - GitHub Actions CI workflow.
 

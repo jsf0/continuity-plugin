@@ -22,8 +22,11 @@ from .store import ContinuityStore
 from .tools import (
     ALL_TOOL_SCHEMAS,
     handle_add,
+    handle_archive,
     handle_delete,
     handle_get,
+    handle_prune_stale,
+    handle_restore,
     handle_search,
 )
 from .tools import (
@@ -229,6 +232,9 @@ class ContinuityProvider(MemoryProvider):
                 "continuity_get",
                 "continuity_add",
                 "continuity_delete",
+                "continuity_archive",
+                "continuity_restore",
+                "continuity_prune_stale",
             }
             and self._store is None
         ):
@@ -258,6 +264,23 @@ class ContinuityProvider(MemoryProvider):
             payload = handle_delete(self._store, args)
             if record_id and self._vector_backend:
                 self._vector_backend.delete(record_id)
+            return json.dumps(payload, ensure_ascii=False)
+        if tool_name == "continuity_archive" and self._store is not None:
+            return json.dumps(handle_archive(self._store, args), ensure_ascii=False)
+        if tool_name == "continuity_restore" and self._store is not None:
+            record_id = str(args.get("id") or "").strip()
+            payload = handle_restore(self._store, args)
+            record = self._store.get_record(record_id) if payload.get("success") else None
+            if record and self._vector_backend:
+                self._vector_backend.upsert(record.id, record.embedding_text or "")
+            return json.dumps(payload, ensure_ascii=False)
+        if tool_name == "continuity_prune_stale" and self._store is not None:
+            payload = handle_prune_stale(
+                self._store, args, stale_after_days=self._config.stale_after_days
+            )
+            if self._vector_backend and payload.get("deleted_ids"):
+                for record_id in payload["deleted_ids"]:
+                    self._vector_backend.delete(str(record_id))
             return json.dumps(payload, ensure_ascii=False)
         return json.dumps(
             {
@@ -290,7 +313,7 @@ class ContinuityProvider(MemoryProvider):
             "vector_backend": self._config.vector_backend,
             "vector_available": bool(self._vector_backend and self._vector_backend.is_available()),
             "vector_count": self._store.count_vectors() if self._store else 0,
-            "phase": "phase-7.6-skill-links",
+            "phase": "phase-8.5-stale-memory-lifecycle",
         }
 
     def _project_display_name(self) -> str | None:

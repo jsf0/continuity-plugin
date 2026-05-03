@@ -29,6 +29,9 @@ def test_phase4_provider_exposes_search_get_add_delete_status_tools() -> None:
         "continuity_get",
         "continuity_add",
         "continuity_delete",
+        "continuity_archive",
+        "continuity_restore",
+        "continuity_prune_stale",
     }
 
 

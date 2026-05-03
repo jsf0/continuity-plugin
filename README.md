@@ -22,7 +22,7 @@ summaries are for recall; sources are for verification; skills are for action; m
 
 The plugin provides a Hermes external memory provider named `continuity`.
 
-Implemented through Phase 7.6:
+Implemented through Phase 8.5:
 
 - SQLite-backed structured `ContextRecord` store.
 - SQLite FTS5 retrieval over titles, summaries, details, tags, and entities.
@@ -36,6 +36,15 @@ Implemented through Phase 7.6:
   - `continuity_get`
   - `continuity_add`
   - `continuity_delete`
+  - `continuity_archive`
+  - `continuity_restore`
+  - `continuity_prune_stale`
+- Stale-memory lifecycle management:
+  - active records are retrieved by default
+  - archived, retracted, and expired records are excluded unless searched with
+    `include_stale`
+  - `continuity_prune_stale` dry-runs by default and can archive or hard-delete
+    deterministic stale candidates
 - Session observation storage and conservative marker-based extraction:
   - `Remember: ...`
   - `Lesson learned: ...`
@@ -112,6 +121,7 @@ memory:
     min_score: 0.1
     include_sources: true
     include_scores: false
+    stale_after_days: 180
     vector:
       enabled: false
       backend: none

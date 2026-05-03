@@ -29,7 +29,7 @@ def test_store_migrates_idempotently(tmp_path: Path) -> None:
     store.migrate()
 
     assert db_path.exists()
-    assert store.schema_versions() == [1, 2, 3]
+    assert store.schema_versions() == [1, 2, 3, 4]
 
 
 def test_upsert_get_list_and_delete_record(tmp_path: Path) -> None:

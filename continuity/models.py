@@ -32,6 +32,8 @@ ALLOWED_TRUST_LEVELS = frozenset(
     }
 )
 
+ALLOWED_RECORD_STATUSES = frozenset({"active", "archived", "retracted"})
+
 ALLOWED_SKILL_LINK_SOURCES = frozenset(
     {
         "explicit_user",
@@ -153,6 +155,10 @@ class ContextRecord:
     expires_at: str | None = None
     source_hash: str | None = None
     embedding_text: str | None = None
+    status: str = "active"
+    superseded_by: str | None = None
+    stale_reason: str | None = None
+    archived_at: str | None = None
 
     def __post_init__(self) -> None:
         _validate_non_empty("id", self.id)
@@ -163,6 +169,8 @@ class ContextRecord:
         _validate_probability("importance", self.importance)
         if self.trust_level not in ALLOWED_TRUST_LEVELS:
             raise ValueError(f"trust_level must be one of {sorted(ALLOWED_TRUST_LEVELS)}")
+        if self.status not in ALLOWED_RECORD_STATUSES:
+            raise ValueError(f"status must be one of {sorted(ALLOWED_RECORD_STATUSES)}")
 
     @classmethod
     def new(
@@ -248,6 +256,10 @@ class ContextRecord:
             "expires_at": self.expires_at,
             "source_hash": self.source_hash,
             "embedding_text": self.embedding_text,
+            "status": self.status,
+            "superseded_by": self.superseded_by,
+            "stale_reason": self.stale_reason,
+            "archived_at": self.archived_at,
         }
 
     @classmethod
@@ -275,6 +287,10 @@ class ContextRecord:
             expires_at=_optional_str(value.get("expires_at")),
             source_hash=_optional_str(value.get("source_hash")),
             embedding_text=_optional_str(value.get("embedding_text")),
+            status=str(value.get("status") or "active"),
+            superseded_by=_optional_str(value.get("superseded_by")),
+            stale_reason=_optional_str(value.get("stale_reason")),
+            archived_at=_optional_str(value.get("archived_at")),
         )
         return record if record.embedding_text else record.with_embedding_text()
 

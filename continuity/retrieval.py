@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from datetime import UTC, datetime
 
 from .embeddings import VectorBackend
 from .models import ContextRecord, SkillLink
@@ -82,12 +83,15 @@ class ContinuityRetriever:
         *,
         scope_project: object = None,
         limit: int = 5,
+        include_stale: bool = False,
     ) -> list[RetrievalHit]:
         tokens = _query_tokens(query)
         expanded_tokens = _expand_tokens(tokens)
         candidates: dict[str, tuple[ContextRecord, float, list[str]]] = {}
 
         for hit in self.store.fts_search(" ".join(expanded_tokens), limit=max(limit * 4, 20)):
+            if not include_stale and _is_inactive_or_expired(hit.record):
+                continue
             base = max(0.0, 1.0 / (1.0 + abs(hit.rank))) * FTS_WEIGHT
             candidates[hit.record.id] = (hit.record, base, ["fts"])
 
@@ -96,6 +100,8 @@ class ContinuityRetriever:
                 record = self.store.get_record(vector_hit.record_id)
                 if record is None:
                     self.vector_backend.delete(vector_hit.record_id)
+                    continue
+                if not include_stale and _is_inactive_or_expired(record):
                     continue
                 vector_score = max(0.0, vector_hit.score) * VECTOR_WEIGHT
                 existing = candidates.get(record.id)
@@ -110,6 +116,8 @@ class ContinuityRetriever:
                     candidates[record.id] = (record, vector_score, ["vector"])
 
         for record in self.store.list_records():
+            if not include_stale and _is_inactive_or_expired(record):
+                continue
             metadata_score, metadata_reasons = _metadata_score(
                 record,
                 expanded_tokens,
@@ -189,6 +197,22 @@ def _metadata_score(
     score -= TRUST_PENALTIES.get(record.trust_level, 0.0)
 
     return score, reasons
+
+
+def _is_inactive_or_expired(record: ContextRecord) -> bool:
+    if record.status != "active":
+        return True
+    if not record.expires_at:
+        return False
+    expires_at = _parse_timestamp(record.expires_at)
+    return expires_at is not None and expires_at <= datetime.now(UTC)
+
+
+def _parse_timestamp(value: str) -> datetime | None:
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
 
 
 def _query_tokens(query: str) -> set[str]:

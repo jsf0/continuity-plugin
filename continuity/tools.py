@@ -8,6 +8,7 @@ from typing import Any
 from .embeddings import VectorBackend
 from .models import ContextRecord, SkillLink, SourceRef
 from .retrieval import ContinuityRetriever, RetrievalHit
+from .staleness import find_stale_candidates
 from .store import ContinuityStore
 
 CONTINUITY_STATUS_SCHEMA: dict[str, object] = {
@@ -31,6 +32,10 @@ CONTINUITY_SEARCH_SCHEMA: dict[str, object] = {
             "scope_project": {
                 "type": "string",
                 "description": "Optional project scope filter/boost.",
+            },
+            "include_stale": {
+                "type": "boolean",
+                "description": "Include archived, retracted, and expired records for inspection.",
             },
         },
         "required": ["query"],
@@ -88,12 +93,53 @@ CONTINUITY_DELETE_SCHEMA: dict[str, object] = {
     },
 }
 
+CONTINUITY_ARCHIVE_SCHEMA: dict[str, object] = {
+    "name": "continuity_archive",
+    "description": "Archive a stale continuity memory record so retrieval excludes it by default.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "id": {"type": "string", "description": "Record id."},
+            "reason": {"type": "string", "description": "Reason for archiving."},
+            "superseded_by": {"type": "string", "description": "Optional replacement record id."},
+        },
+        "required": ["id"],
+    },
+}
+
+CONTINUITY_RESTORE_SCHEMA: dict[str, object] = {
+    "name": "continuity_restore",
+    "description": "Restore an archived or retracted continuity memory record to active retrieval.",
+    "parameters": {
+        "type": "object",
+        "properties": {"id": {"type": "string", "description": "Record id."}},
+        "required": ["id"],
+    },
+}
+
+CONTINUITY_PRUNE_STALE_SCHEMA: dict[str, object] = {
+    "name": "continuity_prune_stale",
+    "description": "Find and optionally archive/delete deterministic stale memory candidates. Dry-run by default.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "dry_run": {"type": "boolean", "description": "Only report candidates; default true."},
+            "mode": {"type": "string", "description": "archive or delete; default archive."},
+            "limit": {"type": "integer", "description": "Maximum candidates to inspect."},
+        },
+        "required": [],
+    },
+}
+
 ALL_TOOL_SCHEMAS = [
     CONTINUITY_STATUS_SCHEMA,
     CONTINUITY_SEARCH_SCHEMA,
     CONTINUITY_GET_SCHEMA,
     CONTINUITY_ADD_SCHEMA,
     CONTINUITY_DELETE_SCHEMA,
+    CONTINUITY_ARCHIVE_SCHEMA,
+    CONTINUITY_RESTORE_SCHEMA,
+    CONTINUITY_PRUNE_STALE_SCHEMA,
 ]
 
 
@@ -108,10 +154,12 @@ def handle_search(
         return {"success": False, "error": "query is required for continuity_search"}
     limit = _bounded_int(args.get("limit"), default=5, minimum=1, maximum=20)
     scope_project = _optional_str(args.get("scope_project"))
+    include_stale = _bool(args.get("include_stale"), False)
     hits = ContinuityRetriever(store, vector_backend=vector_backend).search(
         query,
         scope_project=scope_project,
         limit=limit,
+        include_stale=include_stale,
     )
     return {
         "success": True,
@@ -182,6 +230,61 @@ def handle_delete(store: ContinuityStore, args: dict[str, Any]) -> dict[str, obj
     return {"success": True, "deleted": existed, "id": record_id}
 
 
+def handle_archive(store: ContinuityStore, args: dict[str, Any]) -> dict[str, object]:
+    record_id = str(args.get("id") or "").strip()
+    if not record_id:
+        return {"success": False, "error": "id is required for continuity_archive"}
+    archived = store.archive_record(
+        record_id,
+        reason=_optional_str(args.get("reason")),
+        superseded_by=_optional_str(args.get("superseded_by")),
+    )
+    return {"success": True, "archived": archived, "id": record_id}
+
+
+def handle_restore(store: ContinuityStore, args: dict[str, Any]) -> dict[str, object]:
+    record_id = str(args.get("id") or "").strip()
+    if not record_id:
+        return {"success": False, "error": "id is required for continuity_restore"}
+    restored = store.restore_record(record_id)
+    return {"success": True, "restored": restored, "id": record_id}
+
+
+def handle_prune_stale(
+    store: ContinuityStore, args: dict[str, Any], *, stale_after_days: int = 180
+) -> dict[str, object]:
+    dry_run = _bool(args.get("dry_run"), True)
+    mode = str(args.get("mode") or "archive").strip().lower()
+    if mode not in {"archive", "delete"}:
+        return {"success": False, "error": "mode must be archive or delete"}
+    limit = _bounded_int(args.get("limit"), default=20, minimum=1, maximum=100)
+    candidates = find_stale_candidates(
+        store.list_records(), stale_after_days=stale_after_days, limit=limit
+    )
+    archived_ids: list[str] = []
+    deleted_ids: list[str] = []
+    if not dry_run:
+        for candidate in candidates:
+            if mode == "delete":
+                store.delete_record(candidate.record_id)
+                deleted_ids.append(candidate.record_id)
+            else:
+                if store.archive_record(
+                    candidate.record_id,
+                    reason=candidate.reason,
+                    superseded_by=candidate.superseded_by,
+                ):
+                    archived_ids.append(candidate.record_id)
+    return {
+        "success": True,
+        "dry_run": dry_run,
+        "mode": mode,
+        "candidates": [candidate.to_dict() for candidate in candidates],
+        "archived_ids": archived_ids,
+        "deleted_ids": deleted_ids,
+    }
+
+
 def _hit_to_dict(hit: RetrievalHit) -> dict[str, object]:
     record = hit.record
     return {
@@ -226,6 +329,16 @@ def _bounded_float(value: object, *, default: float) -> float:
     except (TypeError, ValueError):
         parsed = default
     return min(1.0, max(0.0, parsed))
+
+
+def _bool(value: object, default: bool) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.lower() in {"1", "true", "yes", "on"}
+    return bool(value)
 
 
 def _optional_str(value: object) -> str | None:

@@ -116,6 +116,18 @@ Maximum stored characters per user/assistant observation field.
 
 Default: `4000`.
 
+### `stale_after_days`
+
+Age threshold used by `continuity_prune_stale` for conservative low-importance
+candidate detection.
+
+Default: `180`.
+
+This is not an automatic destructive retention policy. Normal retrieval excludes
+records with `status != active` and records whose `expires_at` is in the past.
+`continuity_prune_stale` dry-runs by default, reports candidates and reasons,
+and only mutates records when called with `dry_run: false`.
+
 ### `vector.enabled`
 
 Enables optional vector/hybrid retrieval.

@@ -36,7 +36,7 @@ def test_vector_config_enables_provider_indexing_and_search(tmp_path: Path, monk
     assert add_payload["success"] is True
 
     status = json.loads(provider.handle_tool_call("continuity_status", {}))
-    assert status["phase"] == "phase-7.6-skill-links"
+    assert status["phase"] == "phase-8.5-stale-memory-lifecycle"
     assert status["vector_enabled"] is True
     assert status["vector_available"] is True
     assert status["vector_count"] == 1
