@@ -32,6 +32,8 @@ behavior while the provider API is still stabilizing.
   `archived_at`) with archive/restore and conservative stale-prune tooling.
 - Retrieval excludes archived, retracted, and expired records by default while
   allowing explicit `include_stale` inspection.
+- Pinned system-prompt records plus compact provider-owned continuity guidance that
+  remains active even when pinned records are disabled.
 - Retrieval-noise gates for weak vector-only hits, generic memory-meta queries,
   low-information follow-ups, boilerplate mirrored memory titles, and weak
   association-graph activation anchors.

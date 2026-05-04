@@ -7,9 +7,7 @@ memory:
   provider: continuity
 ```
 
-Hermes passes provider-specific configuration to `ContinuityProvider.initialize()`
-as `continuity_config`. The exact YAML nesting depends on Hermes' config loader,
-but the intended shape is:
+Hermes passes provider-specific configuration to `ContinuityProvider.initialize()` as `continuity_config`. The intended YAML shape is:
 
 ```yaml
 memory:
@@ -27,13 +25,39 @@ memory:
     project_scope_boost: 1.0
     stale_after_days: 180
     observation_max_chars: 4000
+
     vector:
       enabled: false
       backend: none
       embedding_model: null
+      batch_size: 32
+      normalize: true
+
+    reranker:
+      enabled: false
+      backend: none
+      model: null
+      min_score: 0.15
+      weight: 2.0
+      top_k: 20
+
+    association_graph:
+      enabled: true
+      edge_creation_threshold: 0.25
+      out_degree_cap: 20
+      hop_decay: 0.6
+      activation_threshold: 0.3
+      max_hops: 2
+
+    pinned_system_prompt:
+      enabled: false
+      max_chars: 1200
+      max_records: 5
+      kinds: [user_preference, project_convention]
+      min_importance: 0.75
 ```
 
-## Options
+## Top-level options
 
 ### `max_records`
 
@@ -45,9 +69,7 @@ Default: `5`.
 
 Hard character budget for injected prefetch output.
 
-Default: `1800`.
-
-Values below `200` are clamped to `200`.
+Default: `1800`. Values below `200` are clamped to `200`.
 
 ### `min_score`
 
@@ -65,21 +87,17 @@ Default: `true`.
 
 Whether prefetch output includes retrieval scores.
 
-Default: `false`.
-
-Useful for debugging retrieval quality; noisy for normal use.
+Default: `false`. Enable temporarily when debugging retrieval quality.
 
 ### `save_turn_observations`
 
-Whether `sync_turn()` stores sanitized per-turn observations for later
-consolidation.
+Whether `sync_turn()` stores sanitized per-turn observations for later consolidation.
 
 Default: `true`.
 
 ### `consolidate_on_session_end`
 
-Whether `on_session_end()` extracts explicit durable memories from marker
-phrases.
+Whether `on_session_end()` extracts explicit durable memories from marker phrases.
 
 Default: `true`.
 
@@ -99,7 +117,7 @@ Default: `3`.
 
 ### `session_strategy`
 
-Current accepted values:
+Accepted values:
 
 ```text
 per-repo
@@ -110,6 +128,12 @@ per-session
 
 Default: `per-repo`.
 
+### `project_scope_boost`
+
+Score boost for records scoped to the current project.
+
+Default: `1.0`.
+
 ### `observation_max_chars`
 
 Maximum stored characters per user/assistant observation field.
@@ -118,15 +142,13 @@ Default: `4000`.
 
 ### `stale_after_days`
 
-Age threshold used by `continuity_prune_stale` for conservative low-importance
-candidate detection.
+Age threshold used by `continuity_prune_stale` for conservative low-importance candidate detection.
 
 Default: `180`.
 
-This is not an automatic destructive retention policy. Normal retrieval excludes
-records with `status != active` and records whose `expires_at` is in the past.
-`continuity_prune_stale` dry-runs by default, reports candidates and reasons,
-and only mutates records when called with `dry_run: false`.
+This is not an automatic destructive retention policy. Normal retrieval excludes records with `status != active` and records whose `expires_at` is in the past. `continuity_prune_stale` dry-runs by default and only mutates records when called with `dry_run: false`.
+
+## Vector options
 
 ### `vector.enabled`
 
@@ -136,27 +158,158 @@ Default: `false`.
 
 ### `vector.backend`
 
-Supported Phase 7 backend aliases:
+Supported aliases:
 
 ```text
 none
 sqlite-hash
 hash
 sqlite-json
+sentence-transformers
 ```
 
 Unknown values are clamped to `none`.
 
-`sqlite-hash` is dependency-free and stores deterministic hashed vectors in
-SQLite. It is not a neural embedding backend.
+`sqlite-hash` is dependency-free and stores deterministic hashed vectors in SQLite. `sentence-transformers` uses local neural embeddings and requires the `embeddings` extra or equivalent packages.
 
 ### `vector.embedding_model`
 
-Model label for vector rows. With the current backend, use:
+Model label or sentence-transformers model name.
+
+Examples:
 
 ```text
 hash-v1
+BAAI/bge-small-en-v1.5
 ```
+
+### `vector.batch_size`
+
+Batch size for embedding/indexing operations.
+
+Default: `32`.
+
+### `vector.normalize`
+
+Whether embedding vectors should be normalized when the backend supports it.
+
+Default: `true`.
+
+## Reranker options
+
+### `reranker.enabled`
+
+Enables query-record reranking after candidate retrieval.
+
+Default: `false`.
+
+### `reranker.backend`
+
+Supported aliases:
+
+```text
+none
+sentence-transformers
+cross-encoder
+```
+
+### `reranker.model`
+
+Cross-encoder model name. Common local default:
+
+```text
+BAAI/bge-reranker-base
+```
+
+### `reranker.min_score`
+
+Minimum reranker score for direct automatic selection.
+
+Default: `0.15`.
+
+### `reranker.weight`
+
+Score weight added from reranker results.
+
+Default: `2.0`.
+
+### `reranker.top_k`
+
+Maximum candidate count to rerank.
+
+Default: `20`.
+
+## Association graph options
+
+The association graph is additive: it can rescue implicit context related to strong direct or activation-only seeds, but retrieved graph neighbors are lower-confidence context.
+
+### `association_graph.enabled`
+
+Default: `true`.
+
+### `association_graph.edge_creation_threshold`
+
+Minimum deterministic overlap score for creating an association edge between records.
+
+Default: `0.25`.
+
+### `association_graph.out_degree_cap`
+
+Maximum neighbor edges considered per source record during graph traversal.
+
+Default: `20`.
+
+### `association_graph.hop_decay`
+
+Activation decay applied per hop.
+
+Default: `0.6`.
+
+### `association_graph.activation_threshold`
+
+Minimum activation required for an associated neighbor to be eligible for injection.
+
+Default: `0.3`.
+
+### `association_graph.max_hops`
+
+Maximum traversal depth.
+
+Default: `2`.
+
+## Pinned system prompt options
+
+The provider always returns a compact continuity guidance block from `system_prompt_block()` when initialized. Pinned records are optional and disabled by default.
+
+### `pinned_system_prompt.enabled`
+
+Whether high-importance continuity records are included in the system prompt at session start.
+
+Default: `false`.
+
+### `pinned_system_prompt.max_chars`
+
+Character budget for pinned records only, not the provider guidance block.
+
+Default: `1200`.
+
+### `pinned_system_prompt.max_records`
+
+Maximum number of records to pin.
+
+Default: `5`.
+
+### `pinned_system_prompt.kinds`
+
+Record kinds eligible for pinning.
+
+Default: `[user_preference, project_convention]`.
+
+### `pinned_system_prompt.min_importance`
+
+Minimum record importance required for pinning.
+
+Default: `0.75`.
 
 ## Runtime DB
 
@@ -174,3 +327,4 @@ Main tables:
 - `retrieval_events`
 - `context_record_vectors`
 - `context_record_skill_links`
+- `context_record_association_edges`

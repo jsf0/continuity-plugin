@@ -81,6 +81,10 @@ assert search["success"] is True, search
 assert search["results"][0]["id"] == "r_phase8_smoke", search
 assert search["results"][0]["skill_links"][0]["skill_name"] == "devops/openbsd-rust-dev-loop", search
 
+get = json.loads(provider.handle_tool_call("continuity_get", {"id": "r_phase8_smoke"}))
+assert get["success"] is True, get
+assert get["record"]["id"] == "r_phase8_smoke", get
+
 prefetch = provider.prefetch("patch lint rust cargo check", scope_project=ROOT.name)
 assert "Related skills: devops/openbsd-rust-dev-loop" in prefetch, prefetch
 
@@ -99,5 +103,29 @@ assert status["phase"] == "phase-9-continuity-exclusive", status
 assert status["record_count"] >= 2, status
 assert status["vector_available"] is True, status
 
+delete = json.loads(provider.handle_tool_call("continuity_delete", {"id": "r_phase8_smoke"}))
+assert delete["success"] is True, delete
+missing = json.loads(provider.handle_tool_call("continuity_get", {"id": "r_phase8_smoke"}))
+assert missing["success"] is False, missing
+
 print("smoke test ok")
 PY
+
+if command -v uv >/dev/null 2>&1; then
+  rm -rf "$ROOT_DIR/dist"
+  (cd "$ROOT_DIR" && uv build >/dev/null)
+  "${PY[@]}" - <<'PY'
+from __future__ import annotations
+
+from pathlib import Path
+from zipfile import ZipFile
+
+root = Path(__import__("os").environ["TERMINAL_CWD"])
+wheels = sorted((root / "dist").glob("*.whl"))
+assert wheels, "uv build did not create a wheel"
+with ZipFile(wheels[-1]) as wheel:
+    names = set(wheel.namelist())
+assert "continuity/plugin.yaml" in names, "wheel missing continuity/plugin.yaml"
+assert "continuity/py.typed" in names, "wheel missing continuity/py.typed"
+PY
+fi

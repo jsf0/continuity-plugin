@@ -61,8 +61,10 @@ The script:
 3. Loads the provider directly, or through Hermes' plugin loader when Hermes is
    available under `~/.hermes/hermes-agent`.
 4. Initializes the provider.
-5. Adds/searches/deletes a record.
+5. Adds, gets, searches, prefetches, and deletes a record.
 6. Verifies skill-link prefetch behavior.
+7. Verifies mirrored built-in memory writes.
+8. Builds a wheel with `uv` when available and checks `plugin.yaml` / `py.typed` packaging.
 
 Expected output ends with:
 

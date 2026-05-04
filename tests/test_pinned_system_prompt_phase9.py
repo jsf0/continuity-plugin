@@ -52,6 +52,24 @@ def test_system_prompt_block_renders_pinned_high_importance_records(tmp_path: Pa
     assert "This should not be pinned" not in block
 
 
+def test_system_prompt_block_includes_continuity_guidance_when_pinning_disabled(
+    tmp_path: Path,
+) -> None:
+    provider = ContinuityProvider()
+    provider.initialize(
+        session_id="guidance-phase9",
+        hermes_home=str(tmp_path),
+        continuity_config={"pinned_system_prompt": {"enabled": False}},
+    )
+
+    block = provider.system_prompt_block()
+
+    assert "CONTINUITY MEMORY PROVIDER" in block
+    assert "Use the memory tool more readily" in block
+    assert "retrieved records are advisory background" in block
+    assert "continuity_debug_retrieval" in block
+
+
 def test_system_prompt_block_skips_archived_records(tmp_path: Path) -> None:
     provider = ContinuityProvider()
     provider.initialize(
@@ -74,7 +92,10 @@ def test_system_prompt_block_skips_archived_records(tmp_path: Path) -> None:
         )
     )
 
-    assert provider.system_prompt_block() == ""
+    block = provider.system_prompt_block()
+
+    assert "CONTINUITY MEMORY PROVIDER" in block
+    assert "Archived preferences should not be pinned" not in block
 
 
 def test_continuity_status_reports_pinned_prompt_config(tmp_path: Path) -> None:

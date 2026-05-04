@@ -158,6 +158,10 @@ version = "0.1.0"
 source = { editable = "." }
 
 [package.optional-dependencies]
+all = [
+    { name = "sentence-transformers" },
+    { name = "torch" },
+]
 embeddings = [
     { name = "sentence-transformers" },
     { name = "torch" },
@@ -171,10 +175,12 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "sentence-transformers", marker = "extra == 'all'", specifier = ">=2.7" },
     { name = "sentence-transformers", marker = "extra == 'embeddings'", specifier = ">=2.7" },
+    { name = "torch", marker = "extra == 'all'", specifier = ">=2.2" },
     { name = "torch", marker = "extra == 'embeddings'", specifier = ">=2.2" },
 ]
-provides-extras = ["embeddings"]
+provides-extras = ["embeddings", "all"]
 
 [package.metadata.requires-dev]
 dev = [

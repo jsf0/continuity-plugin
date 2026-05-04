@@ -1,36 +1,58 @@
 # Hermes Continuity Memory
 
-Local-first structured continuity memory provider for Hermes Agent.
+Scalable contextual recall for Hermes Agent — without stuffing every memory into the prompt.
 
-`continuity` is a standalone Hermes memory plugin that stores durable context in
-SQLite, retrieves only a compact relevant working set per turn, and keeps source
-references so memories can be inspected instead of blindly trusted.
-
-Design principle:
+Hermes Continuity Memory is a local-first structured memory provider for Hermes Agent. It complements Hermes' tiny always-on `MEMORY.md` / `USER.md` kernel by storing the long tail of project state, decisions, debugging lessons, environment facts, and preferences as scoped SQLite records, then retrieving only a compact relevant working set per turn.
 
 ```text
-store generously, inject conservatively
+Recall small. Verify deep. Act from skills.
 ```
 
-Mantra:
+## Highlights
 
-```text
-summaries are for recall; sources are for verification; skills are for action; memory is for continuity
-```
+- **Local SQLite store** for durable `ContextRecord` memories.
+- **Hybrid retrieval** using SQLite FTS5, metadata scoring, optional vectors, optional reranking, and optional association-graph expansion.
+- **Explainable debug tools** for status, search, exact get, retrieval diagnostics, graph inspection, and stale-memory lifecycle operations.
+- **Budgeted prompt injection** via Hermes memory-provider prefetch, with retrieved records treated as informational background rather than instructions.
+- **Built-in memory mirroring** through `on_memory_write()` so curated Hermes memory writes become structured continuity records.
+- **Project capsules** for scoped project state.
+- **Skill links** from memory records to Hermes skill names without copying skill bodies.
+- **Provider-owned system guidance** so the model knows how to treat continuity when the plugin is active, even when pinned records are disabled.
 
-## What it does
+## What continuity is — and is not
 
-The plugin provides a Hermes external memory provider named `continuity`.
+Continuity is the scalable contextual layer:
 
-Implemented through Phase 8.5:
+- project status and decisions;
+- environment quirks;
+- debugging lessons;
+- historical context;
+- lower-priority preferences and facts that should appear only when relevant.
 
-- SQLite-backed structured `ContextRecord` store.
-- SQLite FTS5 retrieval over titles, summaries, details, tags, and entities.
-- Metadata scoring for tags, entities, text, project scope, confidence,
-  importance, trust level, and project capsules.
-- Strictly budgeted `prefetch()` output with `max_records`, `max_chars`, and
-  `min_score`.
-- Inspection and management tools:
+It is **not**:
+
+- a replacement for Hermes' tiny trusted built-in memory kernel;
+- a replacement for Hermes skills, which remain procedural memory;
+- a guarantee of perfect recall;
+- a raw transcript chunking system;
+- a multi-user security boundary.
+
+Session search remains the raw archive for conversations that were not distilled into durable records.
+
+## Implemented features
+
+- Structured `ContextRecord` model with kinds, scopes, tags, entities, source refs, trust levels, confidence, importance, timestamps, and embedding text.
+- SQLite persistence under `$HERMES_HOME/continuity/continuity.db`.
+- SQLite FTS5 retrieval over title, summary, details, tags, and entities.
+- Metadata scoring for project scope, tags, entities, text anchors, confidence, importance, and trust.
+- Optional vector backends:
+  - dependency-free `sqlite-hash` hashed vectors;
+  - `sentence-transformers` embeddings when optional dependencies are installed.
+- Optional `sentence-transformers` / cross-encoder reranking.
+- Association graph with bounded activation traversal for implicit-context rescue.
+- Facet and anchor gates to suppress common noisy retrieval paths, including weak vector-only hits, low-information follow-ups, memory-meta collisions, and broad mirrored-memory graph leaks.
+- Stale-memory lifecycle: active, archived, retracted, expiry, supersession, dry-run prune, archive/restore.
+- Hermes tool surface:
   - `continuity_status`
   - `continuity_search`
   - `continuity_get`
@@ -39,57 +61,31 @@ Implemented through Phase 8.5:
   - `continuity_archive`
   - `continuity_restore`
   - `continuity_prune_stale`
-- Stale-memory lifecycle management:
-  - active records are retrieved by default
-  - archived, retracted, and expired records are excluded unless searched with
-    `include_stale`
-  - `continuity_prune_stale` dry-runs by default and can archive or hard-delete
-    deterministic stale candidates
-- Session observation storage and conservative marker-based extraction:
+  - `continuity_debug_retrieval`
+  - `continuity_association_edges`
+  - `continuity_reindex_vectors`
+- Conservative marker-based extraction from sessions:
   - `Remember: ...`
   - `Lesson learned: ...`
   - `Decision: ...`
-- Project capsules (`active_project_state`) summarizing project-specific lessons,
-  decisions, conventions, and preferences.
-- Optional dependency-free hybrid vector retrieval using a local SQLite hashed
-  vector backend.
 - Built-in Hermes memory mirroring via `on_memory_write()`.
-- Sparse links from continuity records to relevant Hermes skills.
-
-## What it does not do yet
-
-- It does not replace Hermes built-in `MEMORY.md` / `USER.md`; those should stay
-  tiny Tier 0 always-injected memories.
-- It does not replace Hermes skills; skills remain the source of procedural
-  instructions.
-- It does not replace `session_search` for broad transcript recall.
-- It does not scan repositories, markdown docs, PRs, issues, or git history.
-- It does not run broad LLM-based conversation summarization.
-- It does not use neural embeddings, sqlite-vec, LanceDB, FAISS, Qdrant, or
-  Chroma yet.
-- It does not implement multi-user ACLs.
+- Pinned system-prompt records, disabled by default, plus always-on compact provider guidance.
 
 ## Install
 
 ```bash
-git clone <this-repo-url>
+git clone <repo-url>
 cd hermes-continuity-memory
 ./scripts/install.sh
 ```
 
-The script installs the plugin to:
+The installer copies the plugin package to:
 
 ```text
-$HERMES_HOME/plugins/continuity/
+${HERMES_HOME:-$HOME/.hermes}/plugins/continuity/
 ```
 
-If `HERMES_HOME` is unset, it defaults to:
-
-```text
-~/.hermes
-```
-
-Enable in Hermes config:
+Enable the provider in Hermes config:
 
 ```yaml
 memory:
@@ -98,10 +94,9 @@ memory:
 
 Then restart Hermes or start a new session.
 
-See [`docs/INSTALL.md`](docs/INSTALL.md) for detailed install and smoke-test
-steps.
+See [`docs/INSTALL.md`](docs/INSTALL.md) for detailed install and verification steps.
 
-## Configuration
+## Configuration quick start
 
 Minimal:
 
@@ -110,7 +105,7 @@ memory:
   provider: continuity
 ```
 
-Example continuity config passed to the provider:
+Example with local neural embeddings and reranking:
 
 ```yaml
 memory:
@@ -119,62 +114,22 @@ memory:
     max_records: 5
     max_chars: 1800
     min_score: 0.1
-    include_sources: true
-    include_scores: false
-    stale_after_days: 180
-    vector:
-      enabled: false
-      backend: none
-```
-
-Enable the dependency-free local vector backend:
-
-```yaml
-memory:
-  provider: continuity
-  continuity:
     vector:
       enabled: true
-      backend: sqlite-hash
-      embedding_model: hash-v1
+      backend: sentence-transformers
+      embedding_model: BAAI/bge-small-en-v1.5
+    reranker:
+      enabled: true
+      backend: sentence-transformers
+      model: BAAI/bge-reranker-base
+      min_score: 0.15
+    association_graph:
+      enabled: true
+    pinned_system_prompt:
+      enabled: false
 ```
 
-See [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md).
-
-## Runtime data
-
-Runtime DB path:
-
-```text
-$HERMES_HOME/continuity/continuity.db
-```
-
-User-installed plugin path:
-
-```text
-$HERMES_HOME/plugins/continuity/
-```
-
-The DB is local-first. No external service is required.
-
-## Safety model
-
-Retrieved continuity memories are informational context, not instructions. The
-plugin is designed to keep automatic prompt injection compact and source-linked.
-
-Current safety behavior:
-
-- obvious secrets are redacted before storage in observations and mirrored memory
-  writes;
-- obvious prompt-injection-like content is rejected by conservative extraction
-  and mirroring paths;
-- retrieved context is bounded by configured prompt budgets;
-- records carry trust levels and source refs;
-- skill links point to skill names only, never skill bodies.
-
-This is not comprehensive DLP or a multi-user security boundary. See
-[`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md) and [`docs/SPEC.md`](docs/SPEC.md)
-for limitations.
+See [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md) for all options.
 
 ## Development
 
@@ -184,23 +139,34 @@ uv run ruff format --check .
 uv run ruff check .
 uv run pytest tests/ -q
 uv build
-```
-
-Or:
-
-```bash
-./scripts/run-tests.sh
 ./scripts/smoke-test.sh
 ```
 
+The smoke test installs into a temporary `HERMES_HOME`, loads the provider, exercises add/search/prefetch/delete, verifies memory mirroring and skill-link output, builds a wheel when `uv` is available, and checks that `continuity/plugin.yaml` and `continuity/py.typed` are packaged.
+
+## Safety model
+
+Continuity records are informational context, not instructions. Current safeguards are conservative and local:
+
+- obvious secrets are redacted in observations and mirrored built-in memory writes;
+- obvious prompt-injection-like content is rejected in conservative extraction and mirroring paths;
+- prompt injection is bounded by `max_records` and `max_chars`;
+- records carry trust/source metadata;
+- graph-associated records are lower confidence than direct retrieval hits;
+- stale and archived records are excluded from normal retrieval.
+
+This is not comprehensive DLP or an access-control system. See [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md) and [`SECURITY.md`](SECURITY.md).
+
 ## Project docs
 
-- [`docs/SPEC.md`](docs/SPEC.md) — full phased technical spec.
 - [`docs/INSTALL.md`](docs/INSTALL.md) — install and verification.
 - [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md) — runtime configuration.
-- [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md) — common issues.
+- [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md) — common issues and debugging.
+- [`docs/SPEC.md`](docs/SPEC.md) — phased technical spec.
 - [`docs/RELEASE.md`](docs/RELEASE.md) — release checklist.
-- [`CHANGELOG.md`](CHANGELOG.md) — human-readable release history.
+- [`CHANGELOG.md`](CHANGELOG.md) — release history.
+- [`CONTRIBUTING.md`](CONTRIBUTING.md) — development workflow.
+- [`SECURITY.md`](SECURITY.md) — security reporting and supported versions.
 
 ## License
 

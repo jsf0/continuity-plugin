@@ -23,6 +23,10 @@ embeddings = [
     "sentence-transformers>=2.7",
     "torch>=2.2",
 ]
+all = [
+    "sentence-transformers>=2.7",
+    "torch>=2.2",
+]
 
 [dependency-groups]
 dev = ["pytest>=8.0", "ruff>=0.8"]
