@@ -7,7 +7,8 @@ from typing import Any
 
 from .embeddings import VectorBackend
 from .models import ContextRecord, SkillLink, SourceRef
-from .retrieval import ContinuityRetriever, RetrievalHit
+from .reranking import RerankerBackend
+from .retrieval import ContinuityRetriever, RetrievalHit, candidate_to_debug_dict
 from .staleness import find_stale_candidates
 from .store import ContinuityStore
 
@@ -63,10 +64,16 @@ CONTINUITY_ADD_SCHEMA: dict[str, object] = {
             "title": {"type": "string", "description": "Short title."},
             "summary": {"type": "string", "description": "Compact memory summary."},
             "details": {"type": "string", "description": "Optional details."},
-            "scope_project": {"type": "string", "description": "Optional project scope."},
+            "scope_project": {
+                "type": "string",
+                "description": "Optional project scope.",
+            },
             "scope_user": {"type": "string", "description": "Optional user scope."},
             "scope_repo": {"type": "string", "description": "Optional repo scope."},
-            "scope_profile": {"type": "string", "description": "Optional profile scope."},
+            "scope_profile": {
+                "type": "string",
+                "description": "Optional profile scope.",
+            },
             "tags": {"type": "array", "items": {"type": "string"}},
             "entities": {"type": "array", "items": {"type": "string"}},
             "sources": {"type": "array", "items": {"type": "object"}},
@@ -101,7 +108,10 @@ CONTINUITY_ARCHIVE_SCHEMA: dict[str, object] = {
         "properties": {
             "id": {"type": "string", "description": "Record id."},
             "reason": {"type": "string", "description": "Reason for archiving."},
-            "superseded_by": {"type": "string", "description": "Optional replacement record id."},
+            "superseded_by": {
+                "type": "string",
+                "description": "Optional replacement record id.",
+            },
         },
         "required": ["id"],
     },
@@ -123,9 +133,73 @@ CONTINUITY_PRUNE_STALE_SCHEMA: dict[str, object] = {
     "parameters": {
         "type": "object",
         "properties": {
-            "dry_run": {"type": "boolean", "description": "Only report candidates; default true."},
-            "mode": {"type": "string", "description": "archive or delete; default archive."},
-            "limit": {"type": "integer", "description": "Maximum candidates to inspect."},
+            "dry_run": {
+                "type": "boolean",
+                "description": "Only report candidates; default true.",
+            },
+            "mode": {
+                "type": "string",
+                "description": "archive or delete; default archive.",
+            },
+            "limit": {
+                "type": "integer",
+                "description": "Maximum candidates to inspect.",
+            },
+        },
+        "required": [],
+    },
+}
+
+CONTINUITY_DEBUG_RETRIEVAL_SCHEMA: dict[str, object] = {
+    "name": "continuity_debug_retrieval",
+    "description": "Explain continuity retrieval candidates, scores, and rejection reasons for a query.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "query": {"type": "string", "description": "What to debug."},
+            "limit": {
+                "type": "integer",
+                "description": "Maximum selected results to return.",
+            },
+            "scope_project": {
+                "type": "string",
+                "description": "Optional project scope.",
+            },
+            "include_stale": {
+                "type": "boolean",
+                "description": "Include stale records.",
+            },
+        },
+        "required": ["query"],
+    },
+}
+
+CONTINUITY_ASSOCIATION_EDGES_SCHEMA: dict[str, object] = {
+    "name": "continuity_association_edges",
+    "description": "List continuity memory association graph edges for debugging noisy retrieval.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "record_id": {
+                "type": "string",
+                "description": "Optional record id to inspect adjacent edges only.",
+            },
+            "limit": {"type": "integer", "description": "Maximum edges to return."},
+        },
+        "required": [],
+    },
+}
+
+CONTINUITY_REINDEX_VECTORS_SCHEMA: dict[str, object] = {
+    "name": "continuity_reindex_vectors",
+    "description": "Rebuild vector embeddings for active continuity records.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "include_stale": {
+                "type": "boolean",
+                "description": "Index stale records too.",
+            },
         },
         "required": [],
     },
@@ -140,6 +214,9 @@ ALL_TOOL_SCHEMAS = [
     CONTINUITY_ARCHIVE_SCHEMA,
     CONTINUITY_RESTORE_SCHEMA,
     CONTINUITY_PRUNE_STALE_SCHEMA,
+    CONTINUITY_DEBUG_RETRIEVAL_SCHEMA,
+    CONTINUITY_ASSOCIATION_EDGES_SCHEMA,
+    CONTINUITY_REINDEX_VECTORS_SCHEMA,
 ]
 
 
@@ -148,6 +225,16 @@ def handle_search(
     args: dict[str, Any],
     *,
     vector_backend: VectorBackend | None = None,
+    reranker_backend: RerankerBackend | None = None,
+    reranker_min_score: float = 0.15,
+    reranker_weight: float = 2.0,
+    reranker_top_k: int = 20,
+    association_enabled: bool = True,
+    association_edge_creation_threshold: float = 0.25,
+    association_out_degree_cap: int = 20,
+    association_hop_decay: float = 0.6,
+    association_activation_threshold: float = 0.3,
+    association_max_hops: int = 2,
 ) -> dict[str, object]:
     query = str(args.get("query") or "").strip()
     if not query:
@@ -155,7 +242,20 @@ def handle_search(
     limit = _bounded_int(args.get("limit"), default=5, minimum=1, maximum=20)
     scope_project = _optional_str(args.get("scope_project"))
     include_stale = _bool(args.get("include_stale"), False)
-    hits = ContinuityRetriever(store, vector_backend=vector_backend).search(
+    hits = ContinuityRetriever(
+        store,
+        vector_backend=vector_backend,
+        reranker_backend=reranker_backend,
+        reranker_min_score=reranker_min_score,
+        reranker_weight=reranker_weight,
+        reranker_top_k=reranker_top_k,
+        association_enabled=association_enabled,
+        association_edge_creation_threshold=association_edge_creation_threshold,
+        association_out_degree_cap=association_out_degree_cap,
+        association_hop_decay=association_hop_decay,
+        association_activation_threshold=association_activation_threshold,
+        association_max_hops=association_max_hops,
+    ).search(
         query,
         scope_project=scope_project,
         limit=limit,
@@ -187,7 +287,10 @@ def handle_add(store: ContinuityStore, args: dict[str, Any]) -> dict[str, object
         name for name in ("kind", "title", "summary") if not str(args.get(name) or "").strip()
     ]
     if missing:
-        return {"success": False, "error": f"missing required field(s): {', '.join(missing)}"}
+        return {
+            "success": False,
+            "error": f"missing required field(s): {', '.join(missing)}",
+        }
     try:
         record = ContextRecord.new(
             id=str(args.get("id") or f"r_{uuid.uuid4().hex}"),
@@ -218,6 +321,102 @@ def handle_add(store: ContinuityStore, args: dict[str, Any]) -> dict[str, object
         "success": True,
         "record": record.to_dict(),
         "skill_links": [link.to_dict() for link in skill_links],
+    }
+
+
+def handle_debug_retrieval(
+    store: ContinuityStore,
+    args: dict[str, Any],
+    *,
+    vector_backend: VectorBackend | None = None,
+    reranker_backend: RerankerBackend | None = None,
+    reranker_min_score: float = 0.15,
+    reranker_weight: float = 2.0,
+    reranker_top_k: int = 20,
+    association_enabled: bool = True,
+    association_edge_creation_threshold: float = 0.25,
+    association_out_degree_cap: int = 20,
+    association_hop_decay: float = 0.6,
+    association_activation_threshold: float = 0.3,
+    association_max_hops: int = 2,
+) -> dict[str, object]:
+    query = str(args.get("query") or "").strip()
+    if not query:
+        return {
+            "success": False,
+            "error": "query is required for continuity_debug_retrieval",
+        }
+    limit = _bounded_int(args.get("limit"), default=5, minimum=1, maximum=20)
+    debug = ContinuityRetriever(
+        store,
+        vector_backend=vector_backend,
+        reranker_backend=reranker_backend,
+        reranker_min_score=reranker_min_score,
+        reranker_weight=reranker_weight,
+        reranker_top_k=reranker_top_k,
+        association_enabled=association_enabled,
+        association_edge_creation_threshold=association_edge_creation_threshold,
+        association_out_degree_cap=association_out_degree_cap,
+        association_hop_decay=association_hop_decay,
+        association_activation_threshold=association_activation_threshold,
+        association_max_hops=association_max_hops,
+    ).debug_search(
+        query,
+        scope_project=_optional_str(args.get("scope_project")),
+        limit=limit,
+        include_stale=_bool(args.get("include_stale"), False),
+    )
+    return {
+        "success": True,
+        "query": query,
+        "tokens": debug["tokens"],
+        "expanded_tokens": debug["expanded_tokens"],
+        "selected": [candidate_to_debug_dict(item) for item in debug["selected"]],
+        "rejected": [candidate_to_debug_dict(item) for item in debug["rejected"]],
+        "activation_trace": debug.get("activation_trace", {}),
+    }
+
+
+def handle_association_edges(store: ContinuityStore, args: dict[str, Any]) -> dict[str, object]:
+    limit = _bounded_int(args.get("limit"), default=50, minimum=1, maximum=500)
+    record_id = _optional_str(args.get("record_id"))
+    return {
+        "success": True,
+        "record_id": record_id,
+        "edges": store.list_association_edge_inventory(record_id=record_id, limit=limit),
+    }
+
+
+def handle_reindex_vectors(
+    store: ContinuityStore,
+    args: dict[str, Any],
+    *,
+    vector_backend: VectorBackend | None = None,
+    backend_name: str = "none",
+    model: str | None = None,
+) -> dict[str, object]:
+    if vector_backend is None:
+        return {"success": False, "error": "vector backend is not configured"}
+    if not vector_backend.is_available():
+        return {"success": False, "error": "vector backend is not available"}
+    include_stale = _bool(args.get("include_stale"), False)
+    indexed = 0
+    skipped = 0
+    for record in store.list_records():
+        if not include_stale and record.status != "active":
+            skipped += 1
+            continue
+        vector_backend.upsert(
+            record.id,
+            record.with_embedding_text().embedding_text or record.embedding_text or "",
+        )
+        indexed += 1
+    return {
+        "success": True,
+        "indexed": indexed,
+        "skipped": skipped,
+        "backend": backend_name,
+        "model": model,
     }
 
 
@@ -295,6 +494,9 @@ def _hit_to_dict(hit: RetrievalHit) -> dict[str, object]:
         "scope_project": record.scope_project,
         "score": hit.score,
         "reasons": list(hit.reasons),
+        "retrieval_role": hit.retrieval_role,
+        "activation": hit.activation,
+        "activation_trace": list(hit.activation_trace),
         "sources": [source.to_dict() for source in record.sources],
         "skill_links": [link.to_dict() for link in hit.skill_links],
     }

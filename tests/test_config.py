@@ -33,3 +33,25 @@ def test_config_clamps_unsafe_values() -> None:
     assert config.include_sources is False
     assert config.include_scores is True
     assert config.session_strategy == "per-repo"
+
+
+def test_config_parses_sentence_transformers_vector_backend() -> None:
+    config = ContinuityConfig.from_mapping(
+        {
+            "vector": {
+                "enabled": True,
+                "backend": "sentence-transformers",
+                "embedding_model": "BAAI/bge-small-en-v1.5",
+                "batch_size": 8,
+                "normalize": False,
+            },
+            "pinned_system_prompt": {"enabled": True},
+        }
+    )
+
+    assert config.vector_enabled is True
+    assert config.vector_backend == "sentence-transformers"
+    assert config.embedding_model == "BAAI/bge-small-en-v1.5"
+    assert config.embedding_batch_size == 8
+    assert config.embedding_normalize is False
+    assert config.pinned_system_prompt.enabled is True

@@ -50,6 +50,38 @@ def utc_now() -> str:
 
 
 @dataclass(frozen=True)
+class AssociationEdge:
+    """Undirected association between two continuity memory records."""
+
+    memory_id_a: str
+    memory_id_b: str
+    strength: float
+    edge_type: str
+    last_reinforced_at: str = field(default_factory=utc_now)
+    reinforcement_count: int = 0
+
+    def __post_init__(self) -> None:
+        _validate_non_empty("memory_id_a", self.memory_id_a)
+        _validate_non_empty("memory_id_b", self.memory_id_b)
+        if self.memory_id_a == self.memory_id_b:
+            raise ValueError("association edge endpoints must differ")
+        _validate_probability("strength", self.strength)
+        _validate_non_empty("edge_type", self.edge_type)
+        if self.reinforcement_count < 0:
+            raise ValueError("reinforcement_count cannot be negative")
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "memory_id_a": self.memory_id_a,
+            "memory_id_b": self.memory_id_b,
+            "strength": self.strength,
+            "edge_type": self.edge_type,
+            "last_reinforced_at": self.last_reinforced_at,
+            "reinforcement_count": self.reinforcement_count,
+        }
+
+
+@dataclass(frozen=True)
 class SkillLink:
     """Reference from a continuity memory record to a relevant Hermes skill."""
 
@@ -218,19 +250,22 @@ class ContextRecord:
         return record.with_embedding_text()
 
     def with_embedding_text(self) -> ContextRecord:
-        text = " ".join(
-            part
-            for part in (
-                self.kind,
-                self.scope_project or "",
-                self.title,
-                self.summary,
-                "tags:" + " ".join(self.tags) if self.tags else "",
-                "entities:" + " ".join(self.entities) if self.entities else "",
-            )
-            if part
-        )
-        return _replace_record(self, embedding_text=text)
+        lines = [
+            f"kind: {self.kind}",
+            f"title: {self.title}",
+            f"summary: {self.summary}",
+        ]
+        if self.details:
+            lines.append(f"details: {self.details}")
+        if self.scope_project:
+            lines.append(f"project: {self.scope_project}")
+        if self.scope_repo:
+            lines.append(f"repo: {self.scope_repo}")
+        if self.tags:
+            lines.append("tags: " + ", ".join(self.tags))
+        if self.entities:
+            lines.append("entities: " + ", ".join(self.entities))
+        return _replace_record(self, embedding_text="\n".join(lines))
 
     def to_dict(self) -> dict[str, object]:
         return {

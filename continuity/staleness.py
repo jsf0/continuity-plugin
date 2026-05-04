@@ -38,6 +38,7 @@ def find_stale_candidates(
 
     _add_superseded_project_state_candidates(active_records, candidates)
     _add_mirrored_duplicate_candidates(active_records, candidates)
+    _add_misclassified_extraction_dump_candidates(active_records, candidates)
     _add_age_candidates(active_records, candidates, stale_after_days=stale_after_days)
 
     ordered = sorted(
@@ -90,23 +91,86 @@ def _add_mirrored_duplicate_candidates(
     for group in grouped.values():
         if len(group) < 2:
             continue
-        newest = max(group, key=_freshness_key)
-        for record in group:
-            if record.id == newest.id:
+        ordered = sorted(group, key=_freshness_key, reverse=True)
+        for index, newer in enumerate(ordered):
+            for older in ordered[index + 1 :]:
+                if older.id in candidates:
+                    continue
+                if _records_appear_superseded(older, newer):
+                    candidates[older.id] = StaleCandidate(
+                        older.id,
+                        "older built-in memory mirror appears superseded by a newer similar mirror",
+                        superseded_by=newer.id,
+                    )
+
+    _add_project_status_supersession_candidates(records, candidates)
+
+
+def _add_project_status_supersession_candidates(
+    records: list[ContextRecord], candidates: dict[str, StaleCandidate]
+) -> None:
+    """Archive older project-status mirrors superseded by newer status mirrors.
+
+    Status memories are often replace-style snapshots where exact wording can
+    change substantially after a fix.  Similarity alone misses those updates, so
+    group by project entity plus source bucket and compare chronological pairs.
+    """
+    grouped: dict[tuple[str, str | None], list[ContextRecord]] = {}
+    for record in records:
+        if record.trust_level != "built_in_memory_mirror":
+            continue
+        project_key = _project_status_key(record)
+        if project_key is None:
+            continue
+        grouped.setdefault((project_key, _source_bucket(record)), []).append(record)
+
+    for group in grouped.values():
+        if len(group) < 2:
+            continue
+        ordered = sorted(group, key=_freshness_key, reverse=True)
+        newest = ordered[0]
+        for older in ordered[1:]:
+            if older.id in candidates:
                 continue
-            if (
-                _similar(record.summary, newest.summary) >= 0.72
-                or _shared_terms(record.summary, newest.summary) >= 4
-            ):
-                candidates[record.id] = StaleCandidate(
-                    record.id,
-                    "older built-in memory mirror appears superseded by a newer similar mirror",
-                    superseded_by=newest.id,
-                )
+            candidates[older.id] = StaleCandidate(
+                older.id,
+                "older project status mirror superseded by newer status for the same project/entity",
+                superseded_by=newest.id,
+            )
+
+
+def _add_misclassified_extraction_dump_candidates(
+    records: list[ContextRecord], candidates: dict[str, StaleCandidate]
+) -> None:
+    """Flag accidental session extractions of skills/docs as memories."""
+    procedural_markers = {
+        "rag / vector db guidance",
+        "context_record_association_edges",
+        "embedding_text",
+        "reranker",
+        "continuity_debug_retrieval",
+        "skill_dir",
+        "required_environment_variables",
+    }
+    for record in records:
+        if record.id in candidates:
+            continue
+        if record.trust_level != "session_extracted" or record.kind != "user_preference":
+            continue
+        text = " ".join([record.title, record.summary, record.details or ""]).lower()
+        marker_hits = sum(1 for marker in procedural_markers if marker in text)
+        if marker_hits >= 2 or len(record.entities) >= 40:
+            candidates[record.id] = StaleCandidate(
+                record.id,
+                "misclassified extracted procedural/skill dump, not a durable user preference",
+            )
 
 
 def _add_age_candidates(
-    records: list[ContextRecord], candidates: dict[str, StaleCandidate], *, stale_after_days: int
+    records: list[ContextRecord],
+    candidates: dict[str, StaleCandidate],
+    *,
+    stale_after_days: int,
 ) -> None:
     if stale_after_days <= 0:
         return
@@ -144,14 +208,20 @@ def _is_expired(record: ContextRecord) -> bool:
 
 
 def _freshness_key(record: ContextRecord) -> tuple[datetime, str]:
-    return (_parse_timestamp(record.updated_at) or datetime.min.replace(tzinfo=UTC), record.id)
+    return (
+        _parse_timestamp(record.updated_at) or datetime.min.replace(tzinfo=UTC),
+        record.id,
+    )
 
 
 def _record_sort_key(records_by_id: list[ContextRecord], record_id: str) -> tuple[datetime, str]:
     record = next((item for item in records_by_id if item.id == record_id), None)
     if record is None:
         return (datetime.max.replace(tzinfo=UTC), record_id)
-    return (_parse_timestamp(record.updated_at) or datetime.max.replace(tzinfo=UTC), record.id)
+    return (
+        _parse_timestamp(record.updated_at) or datetime.max.replace(tzinfo=UTC),
+        record.id,
+    )
 
 
 def _source_bucket(record: ContextRecord) -> str | None:
@@ -163,6 +233,26 @@ def _source_bucket(record: ContextRecord) -> str | None:
 
 def _similar(left: str, right: str) -> float:
     return SequenceMatcher(a=left.lower(), b=right.lower()).ratio()
+
+
+def _records_appear_superseded(older: ContextRecord, newer: ContextRecord) -> bool:
+    return (
+        _similar(older.summary, newer.summary) >= 0.68
+        or _shared_terms(older.summary, newer.summary) >= 4
+    )
+
+
+def _project_status_key(record: ContextRecord) -> str | None:
+    terms = _terms(" ".join([record.summary, record.title, *record.tags, *record.entities]))
+    if "status" not in terms:
+        return None
+    for entity in sorted(record.entities):
+        entity_terms = _terms(entity)
+        if entity_terms:
+            return " ".join(sorted(entity_terms))
+    known_project_terms = {"guard-proxy", "hermes-agent", "continuity", "llama.cpp"}
+    matches = sorted(terms & known_project_terms)
+    return matches[0] if matches else None
 
 
 def _shared_terms(left: str, right: str) -> int:

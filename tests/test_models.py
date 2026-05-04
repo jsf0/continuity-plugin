@@ -36,7 +36,9 @@ def test_context_record_round_trips_dict_with_defaults() -> None:
 
     assert restored == record
     assert restored.trust_level == "session_extracted"
-    assert restored.embedding_text.startswith("lesson_learned guard-proxy Delegate timeout")
+    assert "kind: lesson_learned" in restored.embedding_text
+    assert "project: guard-proxy" in restored.embedding_text
+    assert "title: Delegate timeout" in restored.embedding_text
 
 
 @pytest.mark.parametrize("bad_kind", ["", "unknown", "LESSON_LEARNED"])

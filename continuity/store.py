@@ -8,7 +8,7 @@ import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
-from .models import ContextRecord, SkillLink, SourceRef, utc_now
+from .models import AssociationEdge, ContextRecord, SkillLink, SourceRef, utc_now
 from .security import sanitize_observation_text
 
 SCHEMA_VERSION = 4
@@ -123,6 +123,20 @@ class ContinuityStore:
                   PRIMARY KEY(record_id, skill_name),
                   FOREIGN KEY(record_id) REFERENCES context_records(id) ON DELETE CASCADE
                 );
+
+                CREATE TABLE IF NOT EXISTS context_record_association_edges (
+                  memory_id_a TEXT NOT NULL,
+                  memory_id_b TEXT NOT NULL,
+                  strength REAL NOT NULL,
+                  edge_type TEXT NOT NULL,
+                  last_reinforced_at TEXT NOT NULL,
+                  reinforcement_count INTEGER NOT NULL DEFAULT 0,
+                  PRIMARY KEY(memory_id_a, memory_id_b),
+                  FOREIGN KEY(memory_id_a) REFERENCES context_records(id) ON DELETE CASCADE,
+                  FOREIGN KEY(memory_id_b) REFERENCES context_records(id) ON DELETE CASCADE,
+                  CHECK(memory_id_a < memory_id_b),
+                  CHECK(strength >= 0.0 AND strength <= 1.0)
+                );
                 """
             )
             _ensure_context_record_columns(
@@ -156,7 +170,15 @@ class ContinuityStore:
             rows = conn.execute("SELECT version FROM schema_migrations ORDER BY version").fetchall()
         return [int(row["version"]) for row in rows]
 
-    def upsert_record(self, record: ContextRecord) -> None:
+    def upsert_record(
+        self,
+        record: ContextRecord,
+        *,
+        create_associations: bool = True,
+        edge_creation_threshold: float = 0.25,
+        out_degree_cap: int = 20,
+    ) -> None:
+        existing_records = self.list_records() if create_associations else []
         with self.connect() as conn:
             conn.execute(
                 """
@@ -197,6 +219,13 @@ class ContinuityStore:
                 _record_row(record),
             )
             self._replace_fts_row(conn, record)
+        if create_associations:
+            self._create_candidate_association_edges(
+                record,
+                existing_records,
+                threshold=edge_creation_threshold,
+                out_degree_cap=out_degree_cap,
+            )
 
     def get_record(self, record_id: str) -> ContextRecord | None:
         with self.connect() as conn:
@@ -220,10 +249,21 @@ class ContinuityStore:
             conn.execute("DELETE FROM context_records WHERE id = ?", (record_id,))
             conn.execute("DELETE FROM context_records_fts WHERE id = ?", (record_id,))
             conn.execute("DELETE FROM context_record_vectors WHERE record_id = ?", (record_id,))
-            conn.execute("DELETE FROM context_record_skill_links WHERE record_id = ?", (record_id,))
+            conn.execute(
+                "DELETE FROM context_record_skill_links WHERE record_id = ?",
+                (record_id,),
+            )
+            conn.execute(
+                "DELETE FROM context_record_association_edges WHERE memory_id_a = ? OR memory_id_b = ?",
+                (record_id, record_id),
+            )
 
     def archive_record(
-        self, record_id: str, *, reason: str | None = None, superseded_by: str | None = None
+        self,
+        record_id: str,
+        *,
+        reason: str | None = None,
+        superseded_by: str | None = None,
     ) -> bool:
         now = utc_now()
         with self.connect() as conn:
@@ -296,7 +336,10 @@ class ContinuityStore:
 
     def replace_skill_links(self, record_id: str, links: list[SkillLink]) -> None:
         with self.connect() as conn:
-            conn.execute("DELETE FROM context_record_skill_links WHERE record_id = ?", (record_id,))
+            conn.execute(
+                "DELETE FROM context_record_skill_links WHERE record_id = ?",
+                (record_id,),
+            )
             for link in links:
                 conn.execute(
                     """
@@ -319,6 +362,190 @@ class ContinuityStore:
                 "DELETE FROM context_record_skill_links WHERE record_id = ? AND skill_name = ?",
                 (record_id, skill_name),
             )
+
+    def upsert_association_edge(
+        self,
+        memory_id_a: str,
+        memory_id_b: str,
+        *,
+        strength: float,
+        edge_type: str,
+        out_degree_cap: int = 20,
+    ) -> None:
+        """Create or reinforce an undirected association edge between records."""
+        if memory_id_a == memory_id_b:
+            return
+        left, right = sorted((memory_id_a, memory_id_b))
+        bounded_strength = min(1.0, max(0.0, float(strength)))
+        now = utc_now()
+        with self.connect() as conn:
+            existing = conn.execute(
+                """
+                SELECT strength, reinforcement_count FROM context_record_association_edges
+                WHERE memory_id_a = ? AND memory_id_b = ?
+                """,
+                (left, right),
+            ).fetchone()
+            if existing:
+                bounded_strength = max(bounded_strength, float(existing["strength"]))
+                reinforcement_count = int(existing["reinforcement_count"]) + 1
+            else:
+                reinforcement_count = 1
+            conn.execute(
+                """
+                INSERT INTO context_record_association_edges(
+                  memory_id_a, memory_id_b, strength, edge_type,
+                  last_reinforced_at, reinforcement_count
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(memory_id_a, memory_id_b) DO UPDATE SET
+                  strength=excluded.strength,
+                  edge_type=excluded.edge_type,
+                  last_reinforced_at=excluded.last_reinforced_at,
+                  reinforcement_count=excluded.reinforcement_count
+                """,
+                (left, right, bounded_strength, edge_type, now, reinforcement_count),
+            )
+        self._enforce_association_out_degree(left, out_degree_cap)
+        self._enforce_association_out_degree(right, out_degree_cap)
+
+    def list_association_edges(self, record_id: str) -> list[AssociationEdge]:
+        """Return edges adjacent to record_id ordered strongest first.
+
+        The returned edge is oriented from record_id to its neighbor to simplify
+        graph traversal and debug output.
+        """
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT e.* FROM context_record_association_edges e
+                JOIN context_records a ON a.id = e.memory_id_a
+                JOIN context_records b ON b.id = e.memory_id_b
+                WHERE (e.memory_id_a = ? OR e.memory_id_b = ?)
+                  AND a.status = 'active'
+                  AND b.status = 'active'
+                ORDER BY e.strength DESC, e.memory_id_a, e.memory_id_b
+                """,
+                (record_id, record_id),
+            ).fetchall()
+        edges: list[AssociationEdge] = []
+        for row in rows:
+            left = str(row["memory_id_a"])
+            right = str(row["memory_id_b"])
+            neighbor = right if left == record_id else left
+            edges.append(
+                AssociationEdge(
+                    memory_id_a=record_id,
+                    memory_id_b=neighbor,
+                    strength=float(row["strength"]),
+                    edge_type=str(row["edge_type"]),
+                    last_reinforced_at=str(row["last_reinforced_at"]),
+                    reinforcement_count=int(row["reinforcement_count"]),
+                )
+            )
+        return edges
+
+    def list_association_edge_inventory(
+        self, *, record_id: str | None = None, limit: int = 50
+    ) -> list[dict[str, object]]:
+        """List association edges with endpoint titles for debugging/pruning."""
+        bounded_limit = max(1, min(500, int(limit)))
+        if record_id:
+            where = "WHERE (e.memory_id_a = ? OR e.memory_id_b = ?) AND a.status = 'active' AND b.status = 'active'"
+            params: tuple[object, ...] = (record_id, record_id, bounded_limit)
+        else:
+            where = "WHERE a.status = 'active' AND b.status = 'active'"
+            params = (bounded_limit,)
+        with self.connect() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT e.*, a.title AS title_a, a.kind AS kind_a,
+                       b.title AS title_b, b.kind AS kind_b
+                FROM context_record_association_edges e
+                JOIN context_records a ON a.id = e.memory_id_a
+                JOIN context_records b ON b.id = e.memory_id_b
+                {where}
+                ORDER BY e.strength DESC, e.memory_id_a, e.memory_id_b
+                LIMIT ?
+                """,
+                params,
+            ).fetchall()
+        return [
+            {
+                "memory_id_a": str(row["memory_id_a"]),
+                "memory_id_b": str(row["memory_id_b"]),
+                "title_a": str(row["title_a"]),
+                "title_b": str(row["title_b"]),
+                "kind_a": str(row["kind_a"]),
+                "kind_b": str(row["kind_b"]),
+                "strength": float(row["strength"]),
+                "edge_type": str(row["edge_type"]),
+                "last_reinforced_at": str(row["last_reinforced_at"]),
+                "reinforcement_count": int(row["reinforcement_count"]),
+            }
+            for row in rows
+        ]
+
+    def reinforce_associations(self, record_ids: list[str]) -> None:
+        """Reinforce existing edges between records co-retrieved into context."""
+        unique_ids = sorted(set(record_ids))
+        for index, left in enumerate(unique_ids):
+            for right in unique_ids[index + 1 :]:
+                with self.connect() as conn:
+                    row = conn.execute(
+                        """
+                        SELECT strength, edge_type FROM context_record_association_edges
+                        WHERE memory_id_a = ? AND memory_id_b = ?
+                        """,
+                        tuple(sorted((left, right))),
+                    ).fetchone()
+                if row is not None:
+                    self.upsert_association_edge(
+                        left,
+                        right,
+                        strength=min(1.0, float(row["strength"]) + 0.02),
+                        edge_type=str(row["edge_type"]),
+                    )
+
+    def _create_candidate_association_edges(
+        self,
+        record: ContextRecord,
+        existing_records: list[ContextRecord],
+        *,
+        threshold: float,
+        out_degree_cap: int,
+    ) -> None:
+        for other in existing_records:
+            if other.id == record.id:
+                continue
+            strength, edge_type = _association_strength(record, other)
+            if strength >= threshold:
+                self.upsert_association_edge(
+                    record.id,
+                    other.id,
+                    strength=strength,
+                    edge_type=edge_type,
+                    out_degree_cap=out_degree_cap,
+                )
+
+    def _enforce_association_out_degree(self, record_id: str, out_degree_cap: int) -> None:
+        cap = max(1, int(out_degree_cap))
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT memory_id_a, memory_id_b, strength FROM context_record_association_edges
+                WHERE memory_id_a = ? OR memory_id_b = ?
+                ORDER BY strength DESC, memory_id_a, memory_id_b
+                """,
+                (record_id, record_id),
+            ).fetchall()
+            for row in rows[cap:]:
+                conn.execute(
+                    """
+                    DELETE FROM context_record_association_edges
+                    WHERE memory_id_a = ? AND memory_id_b = ?
+                    """,
+                    (row["memory_id_a"], row["memory_id_b"]),
+                )
 
     def upsert_vector(
         self,
@@ -350,7 +577,10 @@ class ContinuityStore:
     def delete_vector(self, record_id: str, *, model: str | None = None) -> None:
         with self.connect() as conn:
             if model is None:
-                conn.execute("DELETE FROM context_record_vectors WHERE record_id = ?", (record_id,))
+                conn.execute(
+                    "DELETE FROM context_record_vectors WHERE record_id = ?",
+                    (record_id,),
+                )
             else:
                 conn.execute(
                     "DELETE FROM context_record_vectors WHERE record_id = ? AND model = ?",
@@ -597,6 +827,149 @@ def _skill_link_from_row(row: sqlite3.Row) -> SkillLink:
             "last_used_at": row["last_used_at"],
         }
     )
+
+
+GENERIC_ASSOCIATION_TOKENS = frozenset(
+    {
+        "active project state",
+        "a",
+        "an",
+        "and",
+        "as",
+        "for",
+        "built in memory",
+        "environment fact",
+        "global",
+        "has",
+        "have",
+        "hermes",
+        "hermes memory",
+        "likely",
+        "memory",
+        "memory target memory",
+        "memory target user",
+        "ordered",
+        "preference",
+        "preferences",
+        "project",
+        "project convention",
+        "project status",
+        "status",
+        "the",
+        "user",
+        "user preference",
+        "with",
+    }
+)
+
+
+def _association_strength(left: ContextRecord, right: ContextRecord) -> tuple[float, str]:
+    left_entities = _association_value_tokens(left.entities)
+    right_entities = _association_value_tokens(right.entities)
+    left_tags = _association_value_tokens(left.tags)
+    right_tags = _association_value_tokens(right.tags)
+    left_text = _association_text_tokens(left)
+    right_text = _association_text_tokens(right)
+
+    if _only_generic_mirror_overlap(
+        left, right, left_entities, right_entities, left_tags, right_tags
+    ):
+        return 0.0, "generic_mirror_overlap"
+
+    entity_overlap = _jaccard(left_entities, right_entities)
+    tag_overlap = _jaccard(left_tags, right_tags)
+    semantic_similarity = _jaccard(left_text, right_text)
+
+    strength = min(
+        1.0,
+        (0.35 if entity_overlap > 0 else 0.0)
+        + (0.15 if tag_overlap > 0 else 0.0)
+        + entity_overlap * 0.6
+        + tag_overlap * 0.55
+        + semantic_similarity * 0.3,
+    )
+    if entity_overlap > 0:
+        edge_type = "entity_overlap"
+    elif tag_overlap > 0:
+        edge_type = "tag_overlap"
+    elif semantic_similarity > 0:
+        edge_type = "semantic_similarity"
+    else:
+        edge_type = "combined"
+    return strength, edge_type
+
+
+def _only_generic_mirror_overlap(
+    left: ContextRecord,
+    right: ContextRecord,
+    left_entities: set[str],
+    right_entities: set[str],
+    left_tags: set[str],
+    right_tags: set[str],
+) -> bool:
+    """Avoid edges formed only by built-in-memory mirror boilerplate."""
+    if not (_is_builtin_mirror(left) and _is_builtin_mirror(right)):
+        return False
+    entity_overlap = left_entities & right_entities
+    tag_overlap = left_tags & right_tags
+    # If mirrored records share no meaningful domain entity and only share the
+    # built-in-memory/source/kind boilerplate, the edge is harmful noise.
+    meaningful_entity_overlap = {
+        token for token in entity_overlap if token not in GENERIC_ASSOCIATION_TOKENS
+    }
+    meaningful_tag_overlap = {
+        token for token in tag_overlap if token not in GENERIC_ASSOCIATION_TOKENS
+    }
+    return not meaningful_entity_overlap and not meaningful_tag_overlap
+
+
+def _is_builtin_mirror(record: ContextRecord) -> bool:
+    return record.trust_level == "built_in_memory_mirror" and record.title.lower() in {
+        "hermes global memory",
+        "hermes user memory",
+    }
+
+
+def _association_text_tokens(record: ContextRecord) -> set[str]:
+    import re
+
+    text = " ".join(
+        [
+            record.title,
+            record.summary,
+            record.details or "",
+            *record.tags,
+            *record.entities,
+        ]
+    ).lower()
+    return {
+        token
+        for raw in re.findall(r"[\w:-]+", text)
+        if (token := _normalize_association_token(raw))
+        and len(token) > 2
+        and token not in GENERIC_ASSOCIATION_TOKENS
+    }
+
+
+def _association_value_tokens(values: list[str]) -> set[str]:
+    return {
+        token
+        for value in values
+        if (token := _normalize_association_token(value))
+        and token not in GENERIC_ASSOCIATION_TOKENS
+    }
+
+
+def _normalize_association_token(value: str) -> str:
+    import re
+
+    return re.sub(r"[^a-z0-9]+", " ", value.lower()).strip()
+
+
+def _jaccard(left: set[str], right: set[str]) -> float:
+    if not left or not right:
+        return 0.0
+    return len(left & right) / len(left | right)
 
 
 def _index_text(values: list[str]) -> str:

@@ -27,4 +27,7 @@ def test_provider_exposes_phase4_tool_schemas() -> None:
         "continuity_archive",
         "continuity_restore",
         "continuity_prune_stale",
+        "continuity_debug_retrieval",
+        "continuity_association_edges",
+        "continuity_reindex_vectors",
     }

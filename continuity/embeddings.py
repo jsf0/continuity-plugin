@@ -19,7 +19,7 @@ from .models import ContextRecord, utc_now
 from .store import ContinuityStore
 
 DEFAULT_DIMENSIONS = 64
-VECTOR_BACKENDS = frozenset({"sqlite-hash", "hash", "sqlite-json"})
+VECTOR_BACKENDS = frozenset({"sqlite-hash", "hash", "sqlite-json", "sentence-transformers"})
 
 SYNONYMS = {
     "hang": "timeout",
@@ -108,6 +108,69 @@ class SQLiteHashVectorBackend:
         return hits[:limit]
 
 
+class SentenceTransformersVectorBackend:
+    """Optional local semantic embedding backend using sentence-transformers."""
+
+    def __init__(
+        self,
+        store: ContinuityStore,
+        *,
+        model: str = "BAAI/bge-small-en-v1.5",
+        normalize: bool = True,
+    ) -> None:
+        self.store = store
+        self.model = model
+        self.normalize = normalize
+        self._model: object | None = None
+
+    def is_available(self) -> bool:
+        try:
+            import sentence_transformers  # noqa: F401
+        except Exception:
+            return False
+        return True
+
+    def upsert(self, record_id: str, text: str) -> None:
+        vector = self.embed([text])[0]
+        self.store.upsert_vector(
+            record_id=record_id,
+            model=self.model,
+            dimensions=len(vector),
+            vector=vector,
+        )
+
+    def delete(self, record_id: str) -> None:
+        self.store.delete_vector(record_id, model=self.model)
+
+    def search(self, query: str, limit: int) -> list[VectorHit]:
+        query_vector = self.embed([query])[0]
+        hits: list[VectorHit] = []
+        for row in self.store.list_vectors(model=self.model):
+            vector = _parse_vector(str(row["vector_json"]))
+            score = cosine_similarity(query_vector, vector)
+            if score > 0:
+                hits.append(VectorHit(record_id=str(row["record_id"]), score=score))
+        hits.sort(key=lambda hit: (-hit.score, hit.record_id))
+        return hits[:limit]
+
+    def embed(self, texts: list[str]) -> list[list[float]]:
+        model = self._load_model()
+        vectors = model.encode(  # type: ignore[attr-defined]
+            texts,
+            normalize_embeddings=self.normalize,
+            convert_to_numpy=True,
+            show_progress_bar=False,
+        )
+        return [_vector_to_float_list(vector) for vector in vectors]
+
+    def _load_model(self) -> object:
+        if self._model is None:
+            from sentence_transformers import SentenceTransformer
+
+            self._model = SentenceTransformer(self.model)
+        return self._model
+
+
 def build_vector_backend(config: object, store: ContinuityStore) -> VectorBackend | None:
     """Create the configured optional vector backend, if supported."""
 
@@ -118,6 +181,12 @@ def build_vector_backend(config: object, store: ContinuityStore) -> VectorBacken
     if backend_name not in VECTOR_BACKENDS:
         return None
     model = str(getattr(config, "embedding_model", None) or "hash-v1")
+    if backend_name == "sentence-transformers":
+        return SentenceTransformersVectorBackend(
+            store,
+            model=str(getattr(config, "embedding_model", None) or "BAAI/bge-small-en-v1.5"),
+            normalize=bool(getattr(config, "embedding_normalize", True)),
+        )
     return SQLiteHashVectorBackend(store, model=model)
 
 
@@ -187,6 +256,14 @@ def _char_ngrams(token: str) -> list[str]:
     if len(compact) < 4:
         return []
     return [f"ng:{compact[index : index + 4]}" for index in range(len(compact) - 3)]
+
+
+def _vector_to_float_list(value: object) -> list[float]:
+    try:
+        iterable = value.tolist()  # type: ignore[attr-defined]
+    except AttributeError:
+        iterable = value
+    return [float(item) for item in iterable]  # type: ignore[union-attr]
 
 
 def _parse_vector(value: str) -> list[float]:

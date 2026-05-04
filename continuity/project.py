@@ -27,11 +27,9 @@ def build_project_capsule(project: ProjectContext, records: list[ContextRecord])
     scoped = [
         record
         for record in records
-        if record.kind != "active_project_state"
-        and (
-            record.scope_project in {None, project.display_name}
-            or record.scope_repo == project.repo_remote
-        )
+        if record.status == "active"
+        and record.kind != "active_project_state"
+        and _record_in_project_scope(record, project)
     ]
     sections = [f"Project: {project.display_name}."]
     sections.extend(_section("Known pitfalls", _summaries_for(scoped, {"lesson_learned"})))
@@ -60,7 +58,22 @@ def build_project_capsule(project: ProjectContext, records: list[ContextRecord])
 def _section(title: str, items: list[str]) -> list[str]:
     if not items:
         return []
-    return [f"{title}:", *[f"- {item}" for item in items[:8]]]
+    return [f"{title}:", *[f"- {_truncate_item(item)}" for item in items[:4]]]
+
+
+def _record_in_project_scope(record: ContextRecord, project: ProjectContext) -> bool:
+    if project.display_name in {"root", ".", ""} and not project.repo_remote:
+        return False
+    if project.repo_remote and record.scope_repo == project.repo_remote:
+        return True
+    return bool(record.scope_project and record.scope_project == project.display_name)
+
+
+def _truncate_item(value: str, max_chars: int = 280) -> str:
+    text = " ".join(value.split())
+    if len(text) <= max_chars:
+        return text
+    return text[: max_chars - 1].rstrip() + "…"
 
 
 def _summaries_for(records: list[ContextRecord], kinds: set[str]) -> list[str]:

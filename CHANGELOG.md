@@ -20,13 +20,21 @@ behavior while the provider API is still stabilizing.
   `continuity_restore`, and `continuity_prune_stale`.
 - Session observation storage and conservative marker-based extraction.
 - Project capsules for active project state.
-- Optional dependency-free SQLite hashed vector backend.
+- Optional dependency-free SQLite hashed vector backend and optional
+  sentence-transformers embedding backend.
+- Optional sentence-transformers cross-encoder reranker for query-record
+  precision filtering.
+- Association graph storage, inventory, and bounded activation traversal for
+  implicit context rescue.
 - Built-in Hermes memory write mirroring via `on_memory_write()`.
 - Skill links from continuity records to relevant Hermes skill names.
 - Stale-memory lifecycle fields (`status`, `superseded_by`, `stale_reason`,
   `archived_at`) with archive/restore and conservative stale-prune tooling.
 - Retrieval excludes archived, retracted, and expired records by default while
   allowing explicit `include_stale` inspection.
+- Retrieval-noise gates for weak vector-only hits, generic memory-meta queries,
+  low-information follow-ups, boilerplate mirrored memory titles, and weak
+  association-graph activation anchors.
 - Install, smoke-test, release, troubleshooting, and configuration docs.
 - GitHub Actions CI workflow.
 
@@ -40,7 +48,8 @@ behavior while the provider API is still stabilizing.
 
 ### Known limitations
 
-- No neural embeddings backend yet.
+- Neural embeddings, reranking, and association graph traversal are optional
+  local backends that require extra dependencies and tuning.
 - No repository/document ingestion yet.
 - No broad LLM-based automatic session summarization yet.
 - No multi-user ACL model.
