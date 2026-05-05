@@ -18,6 +18,9 @@ classifiers = [
 ]
 dependencies = []
 
+[project.scripts]
+continuity-ingest = "continuity.ingest.cli:main"
+
 [project.optional-dependencies]
 embeddings = [
     "sentence-transformers>=2.7",
