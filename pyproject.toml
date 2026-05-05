@@ -20,6 +20,7 @@ dependencies = []
 
 [project.scripts]
 continuity-ingest = "continuity.ingest.cli:main"
+continuity-ingest-llama-cpp = "continuity.ingest.scripts.llama_cpp_extract:main"
 
 [project.optional-dependencies]
 embeddings = [
