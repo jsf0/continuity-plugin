@@ -7,6 +7,7 @@ import json
 from collections.abc import Sequence
 from pathlib import Path
 
+from continuity.ingest.eval import EvalRunner
 from continuity.ingest.importer import ContinuityImporter
 from continuity.ingest.jsonl import read_jsonl, write_jsonl
 from continuity.ingest.models import CandidateRecord, SourceDocument, SourceSegment
@@ -69,6 +70,14 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     import_cmd.add_argument("--apply", action="store_true")
     import_cmd.set_defaults(func=_cmd_import)
+
+    eval_cmd = subcommands.add_parser("eval", help="Run retrieval eval cases")
+    eval_cmd.add_argument("evals")
+    eval_cmd.add_argument(
+        "--db-path", default=str(Path.home() / ".hermes" / "continuity" / "memory.db")
+    )
+    eval_cmd.add_argument("--report")
+    eval_cmd.set_defaults(func=_cmd_eval)
 
     return parser
 
@@ -133,6 +142,21 @@ def _cmd_import(args: argparse.Namespace) -> None:
         dry_run=not args.apply,
     )
     print(json.dumps(result.__dict__, sort_keys=True))
+
+
+def _cmd_eval(args: argparse.Namespace) -> None:
+    result = EvalRunner(ContinuityStore(args.db_path)).run_file(args.evals, report_path=args.report)
+    print(
+        json.dumps(
+            {
+                "passed": result.passed,
+                "total": result.total,
+                "passed_count": result.passed_count,
+                "failed_count": result.failed_count,
+            },
+            sort_keys=True,
+        )
+    )
 
 
 if __name__ == "__main__":  # pragma: no cover

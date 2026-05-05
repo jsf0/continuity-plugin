@@ -121,3 +121,39 @@ def test_cli_import_defaults_to_dry_run_and_apply_writes_records(tmp_path) -> No
     store = ContinuityStore(db_path)
     assert store.count_records() == 1
     assert store.fts_search("fixture", limit=5)
+
+
+def test_cli_eval_runs_retrieval_eval_file(tmp_path) -> None:
+    candidates_path = tmp_path / "approved-records.jsonl"
+    evals_path = tmp_path / "retrieval-evals.jsonl"
+    report_path = tmp_path / "eval-report.jsonl"
+    db_path = tmp_path / "continuity.db"
+    candidate = _candidate()
+    write_jsonl(candidates_path, [candidate.to_dict()])
+    main(["import", str(candidates_path), "--db-path", str(db_path), "--apply"])
+    write_jsonl(
+        evals_path,
+        [
+            {
+                "eval_id": "eval_cli",
+                "query": "What should I know about CLI fixture?",
+                "expected_record_titles": [candidate.title],
+                "expected_tags": ["project-capsule"],
+                "forbidden_tags": ["unrelated-noise"],
+            }
+        ],
+    )
+
+    exit_code = main(
+        [
+            "eval",
+            str(evals_path),
+            "--db-path",
+            str(db_path),
+            "--report",
+            str(report_path),
+        ]
+    )
+
+    assert exit_code == 0
+    assert read_jsonl(report_path)[0]["passed"] is True

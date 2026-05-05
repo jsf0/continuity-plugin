@@ -1,0 +1,107 @@
+from __future__ import annotations
+
+from continuity.ingest.eval import EvalCase, EvalRunner, generate_eval_case
+from continuity.ingest.importer import ContinuityImporter
+from continuity.ingest.jsonl import read_jsonl, write_jsonl
+from continuity.ingest.models import CandidateRecord, SourceRef
+from continuity.store import ContinuityStore
+
+
+def _candidate(
+    candidate_id: str = "cand_eval", *, tags: list[str] | None = None
+) -> CandidateRecord:
+    return CandidateRecord(
+        candidate_id=candidate_id,
+        kind="artifact_summary",
+        title="Project capsule: eval fixture",
+        summary="The eval fixture stores compact source-linked records for ingestion testing.",
+        scope_project="eval-fixture",
+        tags=tags or ["project-capsule", "corpus-ingestion"],
+        entities=["Eval Fixture"],
+        confidence=0.9,
+        importance=0.8,
+        source_refs=[
+            SourceRef(type="file", uri="file://README.md", segment_id="file://README.md#readme")
+        ],
+    )
+
+
+def test_generate_eval_case_from_candidate() -> None:
+    candidate = _candidate()
+
+    eval_case = generate_eval_case(candidate)
+
+    assert isinstance(eval_case, EvalCase)
+    assert eval_case.eval_id.startswith("ing_")
+    assert eval_case.query == "What should I know about Project capsule: eval fixture?"
+    assert eval_case.expected_record_titles == [candidate.title]
+    assert eval_case.expected_tags == ["project-capsule", "corpus-ingestion"]
+    assert eval_case.scope_project == "eval-fixture"
+    assert eval_case.source_candidate_ids == ["cand_eval"]
+    assert EvalCase.from_dict(eval_case.to_dict()) == eval_case
+
+
+def test_eval_runner_passes_when_expected_title_and_tags_are_found(tmp_path) -> None:
+    store = ContinuityStore(tmp_path / "continuity.db")
+    candidate = _candidate()
+    ContinuityImporter(store).import_records([candidate], dry_run=False)
+    eval_case = generate_eval_case(candidate)
+
+    result = EvalRunner(store).run_case(eval_case)
+
+    assert result.passed is True
+    assert result.matched_titles == [candidate.title]
+    assert result.missing_titles == []
+    assert result.missing_tags == []
+    assert result.forbidden_matches == []
+
+
+def test_eval_runner_fails_for_missing_expected_title(tmp_path) -> None:
+    store = ContinuityStore(tmp_path / "continuity.db")
+    ContinuityImporter(store).import_records([_candidate()], dry_run=False)
+    eval_case = EvalCase(
+        eval_id="eval_missing",
+        query="What should I know about nonexistent records?",
+        expected_record_titles=["Not present"],
+        expected_tags=[],
+    )
+
+    result = EvalRunner(store).run_case(eval_case)
+
+    assert result.passed is False
+    assert result.missing_titles == ["Not present"]
+
+
+def test_eval_runner_fails_when_forbidden_tag_is_retrieved(tmp_path) -> None:
+    store = ContinuityStore(tmp_path / "continuity.db")
+    candidate = _candidate(tags=["project-capsule", "forbidden-noise"])
+    ContinuityImporter(store).import_records([candidate], dry_run=False)
+    eval_case = EvalCase(
+        eval_id="eval_forbidden",
+        query="What should I know about eval fixture?",
+        expected_record_titles=[candidate.title],
+        expected_tags=["project-capsule"],
+        forbidden_tags=["forbidden-noise"],
+    )
+
+    result = EvalRunner(store).run_case(eval_case)
+
+    assert result.passed is False
+    assert result.forbidden_matches == ["forbidden-noise"]
+
+
+def test_eval_runner_runs_jsonl_file_and_writes_report(tmp_path) -> None:
+    store = ContinuityStore(tmp_path / "continuity.db")
+    candidate = _candidate()
+    ContinuityImporter(store).import_records([candidate], dry_run=False)
+    evals_path = tmp_path / "retrieval-evals.jsonl"
+    report_path = tmp_path / "eval-report.json"
+    write_jsonl(evals_path, [generate_eval_case(candidate).to_dict()])
+
+    result = EvalRunner(store).run_file(evals_path, report_path=report_path)
+
+    assert result.passed is True
+    assert result.total == 1
+    assert result.passed_count == 1
+    report_rows = read_jsonl(report_path)
+    assert report_rows[0]["passed"] is True
