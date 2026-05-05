@@ -13,6 +13,7 @@ from continuity.ingest.jsonl import read_jsonl, write_jsonl
 from continuity.ingest.models import CandidateRecord, SourceDocument, SourceSegment
 from continuity.ingest.parsers import parser_for_document
 from continuity.ingest.pipeline import IngestionPipeline
+from continuity.ingest.refresh import RefreshPlanner, write_refresh_artifacts
 from continuity.ingest.review import ReviewPolicy, write_review_artifacts
 from continuity.ingest.segmenters import HeadingSectionSegmenter
 from continuity.store import ContinuityStore
@@ -55,6 +56,12 @@ def _build_parser() -> argparse.ArgumentParser:
     run.add_argument("--repo")
     run.add_argument("--collection")
     run.add_argument("--policy", default="conservative")
+    run.add_argument(
+        "--extractor",
+        choices=["deterministic", "llm", "deterministic,llm"],
+        default="deterministic",
+    )
+    run.add_argument("--llm-command")
     run.add_argument("--output", required=True)
     run.set_defaults(func=_cmd_run)
 
@@ -79,6 +86,20 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     eval_cmd.add_argument("--report")
     eval_cmd.set_defaults(func=_cmd_eval)
+
+    refresh = subcommands.add_parser(
+        "refresh", help="Compare a corpus scan with a previous inventory"
+    )
+    refresh.add_argument("path")
+    refresh.add_argument("--previous-inventory", required=True)
+    _add_include_exclude(refresh)
+    refresh.add_argument("--project")
+    refresh.add_argument("--repo")
+    refresh.add_argument("--collection")
+    refresh.add_argument("--db-path")
+    refresh.add_argument("--apply", action="store_true")
+    refresh.add_argument("--output", required=True)
+    refresh.set_defaults(func=_cmd_refresh)
 
     return parser
 
@@ -124,6 +145,8 @@ def _cmd_run(args: argparse.Namespace) -> None:
         repo=args.repo,
         collection=args.collection,
         review_policy=args.policy,
+        extractor_mode=args.extractor,
+        llm_command=args.llm_command,
     )
 
 
@@ -159,6 +182,27 @@ def _cmd_eval(args: argparse.Namespace) -> None:
             sort_keys=True,
         )
     )
+
+
+def _cmd_refresh(args: argparse.Namespace) -> None:
+    planner = RefreshPlanner()
+    current_documents = planner.discover_current(
+        args.path,
+        include=args.include,
+        exclude=args.exclude,
+        project=args.project,
+        repo=args.repo,
+        collection=args.collection,
+    )
+    store = ContinuityStore(args.db_path) if args.db_path else None
+    plan = planner.plan_from_inventory(
+        previous_inventory_path=args.previous_inventory,
+        current_documents=current_documents,
+        store=store,
+        apply=args.apply,
+    )
+    write_refresh_artifacts(args.output, current_documents=current_documents, plan=plan)
+    print(json.dumps(plan.to_dict(), sort_keys=True))
 
 
 if __name__ == "__main__":  # pragma: no cover

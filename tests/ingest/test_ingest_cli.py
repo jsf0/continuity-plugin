@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
 
 from continuity.ingest.cli import main
@@ -164,3 +165,72 @@ def test_cli_eval_runs_retrieval_eval_file(tmp_path) -> None:
 
     assert exit_code == 0
     assert read_jsonl(report_path)[0]["passed"] is True
+
+
+def test_cli_refresh_writes_refresh_artifacts(tmp_path) -> None:
+    corpus = tmp_path / "corpus"
+    shutil.copytree(FIXTURE_ROOT, corpus)
+    previous_inventory = tmp_path / "previous.jsonl"
+    output_dir = tmp_path / "refresh"
+    main(
+        [
+            "inventory",
+            str(corpus),
+            "--include",
+            "README.md",
+            "--output",
+            str(previous_inventory),
+        ]
+    )
+    (corpus / "README.md").write_text("# Simple Corpus\n\nChanged.\n", encoding="utf-8")
+
+    exit_code = main(
+        [
+            "refresh",
+            str(corpus),
+            "--previous-inventory",
+            str(previous_inventory),
+            "--include",
+            "README.md",
+            "--output",
+            str(output_dir),
+        ]
+    )
+
+    assert exit_code == 0
+    assert read_jsonl(output_dir / "changed-sources.jsonl")[0]["source_id"] == "file://README.md"
+    assert (output_dir / "refresh-report.md").exists()
+
+
+def test_cli_run_can_use_llm_command_extractor(tmp_path) -> None:
+    output_dir = tmp_path / "run-llm"
+    command_path = tmp_path / "fake_llm.py"
+    command_path.write_text(
+        "import sys\n"
+        "sys.stdin.read()\n"
+        'print(\'[{"kind":"project_convention","title":"Use source refs",'
+        '"summary":"Corpus records preserve source refs.","tags":["source-refs"],'
+        '"confidence":0.86,"importance":0.7}]\')\n',
+        encoding="utf-8",
+    )
+    llm_command = f"python {command_path}"
+
+    exit_code = main(
+        [
+            "run",
+            str(FIXTURE_ROOT),
+            "--include",
+            "README.md",
+            "--extractor",
+            "llm",
+            "--llm-command",
+            llm_command,
+            "--output",
+            str(output_dir),
+        ]
+    )
+
+    assert exit_code == 0
+    approved = read_jsonl(output_dir / "approved-records.jsonl")
+    assert approved[0]["title"] == "Use source refs"
+    assert approved[0]["source_refs"][0]["segment_id"] == "file://README.md#simple-corpus"

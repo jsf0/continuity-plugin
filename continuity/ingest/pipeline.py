@@ -17,6 +17,7 @@ from continuity.ingest.extractors import (
     ProjectCapsuleExtractor,
 )
 from continuity.ingest.jsonl import write_jsonl
+from continuity.ingest.llm_extractors import CommandLLMClient, LLMCandidateExtractor, LLMClient
 from continuity.ingest.models import (
     CandidateRecord,
     IngestionRunManifest,
@@ -52,8 +53,14 @@ class PipelineResult:
 class IngestionPipeline:
     """Coordinate discovery, extraction, review, and dry-run artifact writing."""
 
-    def __init__(self, *, connector: LocalFilesConnector | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        connector: LocalFilesConnector | None = None,
+        llm_client: LLMClient | None = None,
+    ) -> None:
         self.connector = connector or LocalFilesConnector()
+        self.llm_client = llm_client
 
     def run_dry_inventory_and_segment(
         self,
@@ -69,6 +76,8 @@ class IngestionPipeline:
         repo: str | None = None,
         collection: str | None = None,
         review_policy: str = "conservative",
+        extractor_mode: str = "deterministic",
+        llm_command: str | None = None,
     ) -> PipelineResult:
         """Run a dry corpus ingestion pipeline and write review-first artifacts.
 
@@ -92,6 +101,7 @@ class IngestionPipeline:
                 "repo": repo,
                 "collection": collection,
                 "review_policy": review_policy,
+                "extractor_mode": extractor_mode,
             }
         )
 
@@ -104,7 +114,12 @@ class IngestionPipeline:
             collection=collection,
         )
         segments = self._segment_documents(documents)
-        candidates, rejections = self._extract_and_validate(documents, segments)
+        candidates, rejections = self._extract_and_validate(
+            documents,
+            segments,
+            extractor_mode=extractor_mode,
+            llm_command=llm_command,
+        )
         dedupe_result = BasicDeduper().dedupe(candidates)
         all_rejections = [*rejections, *dedupe_result.rejections]
         review_result = write_review_artifacts(
@@ -189,13 +204,12 @@ class IngestionPipeline:
         self,
         documents: list[SourceDocument],
         segments: list[SourceSegment],
+        *,
+        extractor_mode: str,
+        llm_command: str | None,
     ) -> tuple[list[CandidateRecord], list[Rejection]]:
         document_by_id = {document.source_id: document for document in documents}
-        extractors = [
-            ProjectCapsuleExtractor(),
-            ProcedureCandidateExtractor(),
-            CodeOrConfigFactExtractor(),
-        ]
+        extractors = self._build_extractors(extractor_mode, llm_command)
         normalizer = CandidateNormalizer()
         safety_gate = SafetyGate()
         candidates: list[CandidateRecord] = []
@@ -213,7 +227,14 @@ class IngestionPipeline:
                 )
                 continue
             for extractor in extractors:
-                for raw_candidate in extractor.extract(segment, document):
+                raw_candidates: list[CandidateRecord]
+                if isinstance(extractor, LLMCandidateExtractor):
+                    llm_result = extractor.extract_with_rejections(segment, document)
+                    raw_candidates = llm_result.candidates
+                    rejections.extend(llm_result.rejections)
+                else:
+                    raw_candidates = extractor.extract(segment, document)
+                for raw_candidate in raw_candidates:
                     normalized = normalizer.normalize(raw_candidate)
                     rejection = safety_gate.assess(normalized)
                     if rejection is not None:
@@ -221,6 +242,32 @@ class IngestionPipeline:
                     else:
                         candidates.append(normalized)
         return candidates, rejections
+
+    def _build_extractors(self, extractor_mode: str, llm_command: str | None) -> list[object]:
+        if extractor_mode == "deterministic":
+            return [
+                ProjectCapsuleExtractor(),
+                ProcedureCandidateExtractor(),
+                CodeOrConfigFactExtractor(),
+            ]
+        if extractor_mode == "llm":
+            client = self.llm_client or (CommandLLMClient(llm_command) if llm_command else None)
+            if client is None:
+                raise ValueError("llm extractor requires an injected client or --llm-command")
+            return [LLMCandidateExtractor(client)]
+        if extractor_mode == "deterministic,llm":
+            client = self.llm_client or (CommandLLMClient(llm_command) if llm_command else None)
+            if client is None:
+                raise ValueError(
+                    "deterministic,llm extractor requires an injected client or --llm-command"
+                )
+            return [
+                ProjectCapsuleExtractor(),
+                ProcedureCandidateExtractor(),
+                CodeOrConfigFactExtractor(),
+                LLMCandidateExtractor(client),
+            ]
+        raise ValueError("unknown extractor mode")
 
 
 def run_dry_inventory_and_segment(
@@ -236,6 +283,8 @@ def run_dry_inventory_and_segment(
     repo: str | None = None,
     collection: str | None = None,
     review_policy: str = "conservative",
+    extractor_mode: str = "deterministic",
+    llm_command: str | None = None,
 ) -> PipelineResult:
     """Convenience wrapper for the default ingestion pipeline."""
 
@@ -251,6 +300,8 @@ def run_dry_inventory_and_segment(
         repo=repo,
         collection=collection,
         review_policy=review_policy,
+        extractor_mode=extractor_mode,
+        llm_command=llm_command,
     )
 
 
