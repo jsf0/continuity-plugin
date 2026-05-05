@@ -11,7 +11,7 @@ from pathlib import Path
 from .models import AssociationEdge, ContextRecord, SkillLink, SourceRef, utc_now
 from .security import sanitize_observation_text
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 
 @dataclass(frozen=True)
@@ -137,6 +137,12 @@ class ContinuityStore:
                   CHECK(memory_id_a < memory_id_b),
                   CHECK(strength >= 0.0 AND strength <= 1.0)
                 );
+
+                CREATE TABLE IF NOT EXISTS continuity_state (
+                  key TEXT PRIMARY KEY,
+                  value TEXT NOT NULL,
+                  updated_at TEXT NOT NULL
+                );
                 """
             )
             _ensure_context_record_columns(
@@ -162,6 +168,10 @@ class ContinuityStore:
             )
             conn.execute(
                 "INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)",
+                (4, utc_now()),
+            )
+            conn.execute(
+                "INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)",
                 (SCHEMA_VERSION, utc_now()),
             )
 
@@ -169,6 +179,24 @@ class ContinuityStore:
         with self.connect() as conn:
             rows = conn.execute("SELECT version FROM schema_migrations ORDER BY version").fetchall()
         return [int(row["version"]) for row in rows]
+
+    def get_state(self, key: str) -> str | None:
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT value FROM continuity_state WHERE key = ?", (key,)
+            ).fetchone()
+        return str(row["value"]) if row else None
+
+    def set_state(self, key: str, value: str) -> None:
+        now = utc_now()
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO continuity_state(key, value, updated_at) VALUES (?, ?, ?)
+                ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+                """,
+                (key, value, now),
+            )
 
     def upsert_record(
         self,

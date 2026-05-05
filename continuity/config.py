@@ -36,6 +36,19 @@ class AssociationGraphConfig:
 
 
 @dataclass(frozen=True)
+class DreamConfig:
+    """Configuration for scheduled offline continuity maintenance."""
+
+    enabled: bool = False
+    schedule: str = "03:30"
+    timezone: str = "UTC"
+    mode: str = "report"
+    max_archives_per_run: int = 20
+    run_on_initialize: bool = True
+    run_on_turn: bool = True
+
+
+@dataclass(frozen=True)
 class ContinuityConfig:
     """Runtime configuration for continuity memory."""
 
@@ -64,6 +77,7 @@ class ContinuityConfig:
     reranker_top_k: int = 20
     pinned_system_prompt: PinnedSystemPromptConfig = field(default_factory=PinnedSystemPromptConfig)
     association_graph: AssociationGraphConfig = field(default_factory=AssociationGraphConfig)
+    dream: DreamConfig = field(default_factory=DreamConfig)
 
     @classmethod
     def from_mapping(cls, value: dict[str, Any] | None) -> ContinuityConfig:
@@ -78,6 +92,7 @@ class ContinuityConfig:
         association = (
             data.get("association_graph") if isinstance(data.get("association_graph"), dict) else {}
         )
+        dream = data.get("dream") if isinstance(data.get("dream"), dict) else {}
         strategy = str(data.get("session_strategy") or "per-repo")
         if strategy not in VALID_SESSION_STRATEGIES:
             strategy = "per-repo"
@@ -87,6 +102,10 @@ class ContinuityConfig:
         reranker_backend = str(reranker.get("backend") or "none")
         if reranker_backend not in VALID_RERANKER_BACKENDS:
             reranker_backend = "none"
+        dream_mode = str(dream.get("mode") or "report").strip().lower()
+        if dream_mode not in {"report", "archive-safe", "archive-all-candidates"}:
+            dream_mode = "report"
+        dream_schedule = _schedule_str(dream.get("schedule"), "03:30")
         return cls(
             max_records=max(1, _int(data.get("max_records"), 5)),
             max_chars=max(200, _int(data.get("max_chars"), 1800)),
@@ -133,7 +152,31 @@ class ContinuityConfig:
                 ),
                 max_hops=max(1, _int(association.get("max_hops"), 2)),
             ),
+            dream=DreamConfig(
+                enabled=_bool(dream.get("enabled"), False),
+                schedule=dream_schedule,
+                timezone=str(dream.get("timezone") or "UTC").strip() or "UTC",
+                mode=dream_mode,
+                max_archives_per_run=max(1, _int(dream.get("max_archives_per_run"), 20)),
+                run_on_initialize=_bool(dream.get("run_on_initialize"), True),
+                run_on_turn=_bool(dream.get("run_on_turn"), True),
+            ),
         )
+
+
+def _schedule_str(value: object, default: str) -> str:
+    text = str(value or default).strip()
+    parts = text.split(":")
+    if len(parts) != 2:
+        return default
+    try:
+        hour = int(parts[0])
+        minute = int(parts[1])
+    except ValueError:
+        return default
+    if not (0 <= hour <= 23 and 0 <= minute <= 59):
+        return default
+    return f"{hour:02d}:{minute:02d}"
 
 
 def _int(value: object, default: int) -> int:

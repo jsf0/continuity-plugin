@@ -56,7 +56,6 @@ ALIASES = {
     "towing": {"tow", "trailer", "trailerable", "hitch", "vehicle", "truck", "raptor"},
     "trailer": {"tow", "towing", "trailerable", "hitch"},
     "setup": {"vehicle", "personal_setup"},
-    "framework": {"framework", "desktop", "hardware"},
     "proxy": {"guard-proxy"},
 }
 
@@ -184,6 +183,76 @@ MEMORY_META_GENERIC_TOKENS = frozenset({"memory", "record"})
 MEMORY_META_ACTION_TOKENS = frozenset({"issue", "link", "noise", "retrieval"})
 MEMORY_META_RECORD_ANCHORS = MEMORY_META_INTENT_TOKENS | frozenset(
     {"memory-system", "memory-provider"}
+)
+
+PREFERENCE_QUERY_TOKENS = frozenset(
+    {"prefer", "preference", "prefs", "style", "work_style", "handle"}
+)
+
+FACET_TOKEN_MAP = {
+    "software_project": frozenset(
+        {
+            "api",
+            "repo",
+            "code",
+            "library",
+            "package",
+            "service",
+            "web",
+            "cli",
+            "plugin",
+            "python",
+            "rust",
+            "test",
+            "docs",
+            "guard-proxy",
+            "spki",
+            "reqwest",
+        }
+    ),
+    "personal_hardware": frozenset(
+        {
+            "hardware",
+            "desktop",
+            "laptop",
+            "gpu",
+            "cpu",
+            "nvme",
+            "ram",
+            "bios",
+            "boot",
+            "usb",
+            "secure",
+            "openbsd",
+            "ryzen",
+        }
+    ),
+    "memory_system": MEMORY_META_INTENT_TOKENS
+    | frozenset({"memory", "record", "prefetch", "provider", "association-graph"}),
+    "vehicle_towing": frozenset(
+        {"vehicle", "truck", "towing", "tow", "trailer", "trailerable", "hitch", "raptor"}
+    ),
+    "boating": frozenset({"boat", "sailboat", "catamaran", "hobie", "catalina", "sailing", "lake"}),
+    "personal_preference": PREFERENCE_QUERY_TOKENS
+    | frozenset({"methodical", "thorough", "correct", "discuss", "done", "work_style"}),
+    "model_eval": frozenset({"model", "llm", "nemotron", "programming", "eval"}),
+    "devops_security": frozenset(
+        {"guard-proxy", "spki", "reqwest", "rustls", "detector", "deployment", "security"}
+    ),
+}
+
+INCOMPATIBLE_FACET_PAIRS = frozenset(
+    {
+        frozenset({"software_project", "personal_hardware"}),
+        frozenset({"memory_system", "personal_hardware"}),
+        frozenset({"memory_system", "vehicle_towing"}),
+        frozenset({"memory_system", "boating"}),
+        frozenset({"personal_preference", "software_project"}),
+        frozenset({"personal_preference", "memory_system"}),
+        frozenset({"personal_preference", "personal_hardware"}),
+        frozenset({"personal_preference", "boating"}),
+        frozenset({"personal_preference", "vehicle_towing"}),
+    }
 )
 
 
@@ -318,7 +387,9 @@ class ContinuityRetriever:
         expanded_tokens = _expand_tokens(tokens)
         raw_tokens = _raw_query_tokens(query)
         personal_query = bool(raw_tokens & PERSONAL_QUERY_RAW_TERMS)
+        preference_query = _is_preference_query(expanded_tokens, personal_query=personal_query)
         memory_meta_query = _is_memory_meta_query(expanded_tokens)
+        query_facets = _facets_for_tokens(expanded_tokens)
         candidates: dict[str, CandidateScore] = {}
         effective_scope = str(scope_project) if scope_project else None
 
@@ -375,6 +446,17 @@ class ContinuityRetriever:
                 candidate.rejected_reason = "memory_meta_without_domain_anchor"
                 rejected.append(candidate)
                 continue
+            record_facets = _facets_for_record(candidate.record)
+            if _memory_system_record_without_meta_query(
+                candidate.record, query_facets, record_facets
+            ):
+                candidate.rejected_reason = "memory_system_record_without_meta_query"
+                rejected.append(candidate)
+                continue
+            if _facets_incompatible(query_facets, record_facets):
+                candidate.rejected_reason = "facet_incompatible_candidate"
+                rejected.append(candidate)
+                continue
             if _is_low_information_direct_query(expanded_tokens) and not (
                 _direct_low_information_candidate_allowed(
                     candidate.record, expanded_tokens, effective_scope
@@ -390,10 +472,13 @@ class ContinuityRetriever:
             selected.append(candidate)
 
         self._apply_reranker(query, selected, rejected)
+        if preference_query:
+            _restore_preference_candidates(selected, rejected, expanded_tokens)
         activation_trace = self._apply_association_graph(
             selected,
             rejected,
             expanded_tokens=expanded_tokens,
+            query_facets=query_facets,
             personal_query=personal_query,
             include_stale=include_stale,
         )
@@ -446,6 +531,7 @@ class ContinuityRetriever:
         rejected: list[CandidateScore],
         *,
         expanded_tokens: set[str],
+        query_facets: set[str],
         personal_query: bool,
         include_stale: bool,
     ) -> dict[str, object]:
@@ -480,6 +566,9 @@ class ContinuityRetriever:
                 continue
             if not _has_strong_activation_anchor(candidate, expanded_tokens):
                 candidate.rejected_reason = "weak_anchor_activation_seed"
+                continue
+            if _facets_incompatible(query_facets, _facets_for_record(candidate.record)):
+                candidate.rejected_reason = "facet_incompatible_activation_seed"
                 continue
             activation = _candidate_activation(candidate)
             if activation < self.association_activation_threshold:
@@ -562,6 +651,7 @@ class ContinuityRetriever:
                     neighbor=record,
                     edge_type=edge.edge_type,
                     expanded_tokens=expanded_tokens,
+                    query_facets=query_facets,
                     personal_query=personal_query,
                 )
                 if not neighbor_allowed:
@@ -617,9 +707,20 @@ def _association_neighbor_allowed(
     neighbor: ContextRecord,
     edge_type: str,
     expanded_tokens: set[str],
+    query_facets: set[str],
     personal_query: bool,
 ) -> tuple[bool, str]:
     """Gate graph-expanded neighbors so broad edges do not pollute context."""
+    if _facets_incompatible(query_facets, _facets_for_record(neighbor)):
+        return False, "facet_incompatible_associative_neighbor"
+    if _memory_system_record_without_meta_query(
+        neighbor, query_facets, _facets_for_record(neighbor)
+    ):
+        return False, "memory_system_neighbor_without_meta_query"
+    if neighbor.trust_level == "built_in_memory_mirror" and not (
+        expanded_tokens & _record_metadata_tokens(neighbor)
+    ):
+        return False, "mirror_neighbor_without_metadata_anchor"
     if (
         personal_query
         and neighbor.kind in PROJECT_STATUS_KINDS
@@ -650,11 +751,22 @@ def _association_neighbor_allowed(
 
 
 def _record_anchor_tokens(record: ContextRecord) -> set[str]:
-    return (
-        {_normalize_token(tag) for tag in record.tags}
-        | {_normalize_token(entity) for entity in record.entities}
-        | _record_text_tokens(record)
-    )
+    return _record_metadata_tokens(record) | _record_text_tokens(record)
+
+
+def _record_metadata_tokens(record: ContextRecord) -> set[str]:
+    tokens: set[str] = set()
+    for tag in record.tags:
+        tokens.update(_query_tokens(tag))
+        normalized = _normalize_token(tag)
+        if normalized:
+            tokens.add(normalized)
+    for entity in record.entities:
+        tokens.update(_query_tokens(entity))
+        normalized = _normalize_token(entity)
+        if normalized:
+            tokens.add(normalized)
+    return tokens
 
 
 def _candidate_activation(candidate: CandidateScore) -> float:
@@ -734,6 +846,75 @@ def _has_strong_activation_anchor(candidate: CandidateScore, tokens: set[str]) -
         # unrelated mirrored hardware/project memories.
         return False
     return bool(candidate.text_score > 0 and strong_tokens & _record_text_tokens(record))
+
+
+def _is_preference_query(tokens: set[str], *, personal_query: bool) -> bool:
+    return personal_query and bool(tokens & PREFERENCE_QUERY_TOKENS)
+
+
+def _restore_preference_candidates(
+    selected: list[CandidateScore], rejected: list[CandidateScore], tokens: set[str]
+) -> None:
+    """Let explicit personal-preference memories survive weak direct reranking.
+
+    Rerankers often score short preference mirrors poorly because they do not
+    directly answer the surface question.  For first-person preference-intent
+    queries, a personal preference record with non-generic lexical/tag overlap is
+    safer than letting an unrelated project record enter through the graph.
+    """
+    strong_tokens = tokens - WEAK_ANCHOR_TOKENS
+    for candidate in list(rejected):
+        if candidate.rejected_reason != "below_min_reranker_score":
+            continue
+        if candidate.record.kind not in PERSONAL_KINDS:
+            continue
+        record_tokens = _record_anchor_tokens(candidate.record)
+        record_facets = _facets_for_record(candidate.record)
+        if "personal_preference" not in record_facets:
+            continue
+        if not (
+            strong_tokens & record_tokens
+            or tokens & {_normalize_token(tag) for tag in candidate.record.tags}
+        ):
+            continue
+        rejected.remove(candidate)
+        candidate.rejected_reason = None
+        candidate.retrieval_role = "direct_seed"
+        candidate.reasons.append("preference_query")
+        selected.append(candidate)
+
+
+def _facets_for_tokens(tokens: set[str]) -> set[str]:
+    return {facet for facet, facet_tokens in FACET_TOKEN_MAP.items() if tokens & facet_tokens}
+
+
+def _facets_for_record(record: ContextRecord) -> set[str]:
+    tokens = _record_anchor_tokens(record)
+    facets = _facets_for_tokens(tokens)
+    if record.scope_project and record.scope_project not in GENERIC_PROJECT_SCOPES:
+        facets |= _facets_for_tokens(_query_tokens(record.scope_project))
+    if record.kind in PROJECT_STATUS_KINDS:
+        facets.add("software_project")
+    return facets
+
+
+def _facets_incompatible(query_facets: set[str], record_facets: set[str]) -> bool:
+    if not query_facets or not record_facets:
+        return False
+    if query_facets & record_facets:
+        return False
+    return any(pair <= (query_facets | record_facets) for pair in INCOMPATIBLE_FACET_PAIRS)
+
+
+def _memory_system_record_without_meta_query(
+    record: ContextRecord, query_facets: set[str], record_facets: set[str]
+) -> bool:
+    if "memory_system" in query_facets or "memory_system" not in record_facets:
+        return False
+    record_tags = {_normalize_token(tag) for tag in record.tags}
+    return record.scope_project == "hermes-continuity-memory" or bool(
+        record_tags & MEMORY_META_RECORD_ANCHORS
+    )
 
 
 def _apply_metadata_score(candidate: CandidateScore, tokens: set[str]) -> None:

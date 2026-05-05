@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Association Graph Rescue: Boat Towing Query</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  body{margin:0;background:#020617;color:#e2e8f0;font-family:'JetBrains Mono',monospace}.wrap{width:1500px;margin:0 auto;padding:28px;box-sizing:border-box}h1{margin:0;font-size:25px;letter-spacing:-.03em}.sub{margin-top:8px;color:#94a3b8;font-size:12px;line-height:1.5}.panel{margin-top:18px;border:1px solid #1e293b;border-radius:18px;background:rgba(15,23,42,.74);overflow:hidden;box-shadow:0 30px 80px rgba(0,0,0,.38)}.cards{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:16px}.card{border:1px solid #1e293b;border-radius:14px;background:rgba(15,23,42,.78);padding:14px 16px}.card h3{font-size:13px;margin:0 0 8px}.card p{margin:0;color:#94a3b8;font-size:11px;line-height:1.55}footer{margin-top:12px;text-align:right;color:#64748b;font-size:10px}
+  svg text{font-family:'JetBrains Mono',monospace}.title{font-size:14px;font-weight:700;fill:#e2e8f0}.label{font-size:11px;font-weight:600;fill:#e2e8f0}.small{font-size:9px;font-weight:500;fill:#94a3b8}.tiny{font-size:8px;font-weight:500;fill:#94a3b8}.bg{fill:#0f172a}.frontend{fill:rgba(8,51,68,.45);stroke:#22d3ee;stroke-width:1.5}.backend{fill:rgba(6,78,59,.45);stroke:#34d399;stroke-width:1.5}.db{fill:rgba(76,29,149,.45);stroke:#a78bfa;stroke-width:1.5}.cloud{fill:rgba(120,53,15,.34);stroke:#fbbf24;stroke-width:1.5}.security{fill:rgba(136,19,55,.40);stroke:#fb7185;stroke-width:1.5}.bus{fill:rgba(251,146,60,.34);stroke:#fb923c;stroke-width:1.5}.muted{fill:rgba(30,41,59,.58);stroke:#94a3b8;stroke-width:1.3}.boundary{fill:rgba(15,23,42,.26);stroke:#334155;stroke-dasharray:8 5}.flow{stroke:#64748b;stroke-width:2;fill:none;marker-end:url(#arrow)}.flowC{stroke:#22d3ee;stroke-width:2.4;fill:none;marker-end:url(#arrowC)}.flowE{stroke:#34d399;stroke-width:2.6;fill:none;marker-end:url(#arrowE)}.flowA{stroke:#fbbf24;stroke-width:2;fill:none;stroke-dasharray:7 5;marker-end:url(#arrowA)}.flowR{stroke:#fb7185;stroke-width:2;fill:none;stroke-dasharray:5 4;marker-end:url(#arrowR)}.seed{fill:#fbbf24;stroke:#fde68a;stroke-width:1.5}.selected{fill:#34d399;stroke:#bbf7d0;stroke-width:1.5}.candidate{fill:#22d3ee;stroke:#a5f3fc;stroke-width:1}.rejected{fill:#475569;stroke:#64748b;stroke-width:1}.cut{fill:#fb7185;stroke:#fecdd3;stroke-width:1}.pill{fill:#0f172a;stroke:#334155;stroke-width:1}.pillSeed{fill:rgba(120,53,15,.32);stroke:#fbbf24;stroke-width:1.2}.pillGreen{fill:rgba(6,78,59,.26);stroke:#34d399;stroke-width:1.2}.pillRose{fill:rgba(136,19,55,.18);stroke:#fb7185;stroke-width:1.1}.pillSlate{fill:rgba(30,41,59,.48);stroke:#64748b;stroke-width:1}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Association Graph Rescue: Boat Towing Query</h1>
+  <div class="sub">Live debug example where reranking alone would not directly select records. The association graph activates the right context through seeded memory nodes. Personal details are generalized.</div>
+  <div class="panel">
+  <svg viewBox="0 0 1444 1040" role="img" aria-label="Association graph rescue diagram for a boat towing query">
+    <defs>
+      <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse"><path d="M40 0 L0 0 0 40" fill="none" stroke="#1e293b" stroke-width=".5"/></pattern>
+      <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#64748b"/></marker>
+      <marker id="arrowC" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#22d3ee"/></marker>
+      <marker id="arrowE" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#34d399"/></marker>
+      <marker id="arrowA" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#fbbf24"/></marker>
+      <marker id="arrowR" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#fb7185"/></marker>
+    </defs>
+    <rect width="1444" height="1040" fill="#020617"/><rect width="1444" height="1040" fill="url(#grid)" opacity=".85"/>
+    <rect x="34" y="34" width="1376" height="920" rx="18" class="boundary"/>
+    <text x="58" y="62" class="small">Live query: “I'm thinking of buying a boat. what is my size limit based on towing capacity?”</text>
+
+    <!-- Top row: primary retrieval -->
+    <rect x="58" y="104" width="218" height="122" rx="12" class="bg"/><rect x="58" y="104" width="218" height="122" rx="12" class="frontend"/>
+    <text x="78" y="133" class="title">0. User query</text>
+    <text x="78" y="158" class="small">boat size limit</text>
+    <text x="78" y="174" class="small">based on towing</text>
+    <text x="78" y="190" class="small">capacity</text>
+
+    <rect x="336" y="104" width="238" height="122" rx="12" class="bg"/><rect x="336" y="104" width="238" height="122" rx="12" class="backend"/>
+    <text x="356" y="133" class="title">1. Retrieval engine</text>
+    <text x="356" y="158" class="small">expand anchors</text>
+    <text x="356" y="174" class="small">boat, tow, truck,</text>
+    <text x="356" y="190" class="small">trailer, sailboat</text>
+
+    <rect x="636" y="104" width="220" height="122" rx="12" class="bg"/><rect x="636" y="104" width="220" height="122" rx="12" class="db"/>
+    <text x="656" y="133" class="title">2. Continuity DB</text>
+    <text x="656" y="158" class="small">records + graph edges</text>
+    <text x="656" y="176" class="tiny">FTS / vector / tags</text>
+    <text x="656" y="190" class="tiny">entities / association table</text>
+
+    <rect x="918" y="104" width="238" height="122" rx="12" class="bg"/><rect x="918" y="104" width="238" height="122" rx="12" class="cloud"/>
+    <text x="938" y="133" class="title">3. Candidate scoring</text>
+    <text x="938" y="158" class="small">strong pre-rerank</text>
+    <text x="938" y="174" class="small">anchors, but low</text>
+    <text x="938" y="190" class="small">reranker scores</text>
+
+    <rect x="1218" y="104" width="142" height="122" rx="12" class="bg"/><rect x="1218" y="104" width="142" height="122" rx="12" class="muted"/>
+    <text x="1238" y="133" class="title">4. Router</text>
+    <text x="1238" y="158" class="small">no direct</text>
+    <text x="1238" y="174" class="small">seeds;</text>
+    <text x="1238" y="190" class="small">make seeds</text>
+
+    <path d="M276 165 H336" class="flowC"/><text x="292" y="153" class="tiny">query</text>
+    <path d="M574 165 H636" class="flowC"/><text x="586" y="153" class="tiny">search DB</text>
+    <path d="M856 165 H918" class="flow"/><text x="866" y="153" class="tiny">candidate rows</text>
+    <path d="M1156 165 H1218" class="flow"/><text x="1164" y="153" class="tiny">scores</text>
+
+    <!-- Middle row: activation seeds -->
+    <rect x="78" y="330" width="380" height="238" rx="14" class="bg"/><rect x="78" y="330" width="380" height="238" rx="14" class="cloud"/>
+    <text x="104" y="362" class="title">5. Activation seeds</text>
+    <text x="104" y="383" class="small">Candidates failed direct reranker</text>
+    <text x="104" y="399" class="small">threshold, but had strong anchors.</text>
+    <rect x="106" y="426" width="324" height="42" rx="8" class="pillSeed"/><circle cx="128" cy="447" r="9" class="seed"/><text x="146" y="443" class="label">Tow/storage setup</text><text x="146" y="461" class="tiny">activation seed • source activation 1.0</text>
+    <rect x="106" y="482" width="324" height="42" rx="8" class="pillSeed"/><circle cx="128" cy="503" r="9" class="seed"/><text x="146" y="499" class="label">Boat-shopping context</text><text x="146" y="517" class="tiny">activation seed • source activation 1.0</text>
+    <rect x="106" y="538" width="324" height="18" rx="8" class="pillSeed"/><text x="146" y="551" class="tiny">one generic-method seed also rejected later</text>
+
+    <!-- Association graph detail -->
+    <rect x="532" y="312" width="402" height="274" rx="14" class="bg"/><rect x="532" y="312" width="402" height="274" rx="14" class="bus"/>
+    <text x="558" y="344" class="title">6. Association graph traversal</text>
+    <text x="558" y="365" class="small">Seeds spread activation across edges.</text>
+    <text x="558" y="381" class="small">Neighbors can be rescued without</text>
+    <text x="558" y="397" class="small">passing direct-answer reranking.</text>
+
+    <!-- Mini graph nodes inside box -->
+    <circle cx="632" cy="462" r="34" class="seed"/><text x="606" y="459" class="tiny">tow +</text><text x="602" y="472" class="tiny">storage</text>
+    <circle cx="820" cy="462" r="34" class="selected"/><text x="796" y="459" class="tiny">boat</text><text x="790" y="472" class="tiny">context</text>
+    <path d="M666 462 H786" class="flowE"/><text x="696" y="448" class="tiny">edge .795</text><text x="694" y="482" class="tiny">activation .477</text>
+    <circle cx="726" cy="538" r="22" class="cut"/><text x="708" y="542" class="tiny">cut</text>
+    <path d="M646 492 C662 520 688 536 704 538" class="flowR"/><text x="608" y="526" class="tiny">.280</text>
+    <path d="M806 492 C792 520 762 536 748 538" class="flowR"/><text x="814" y="526" class="tiny">.270</text>
+    <text x="558" y="572" class="tiny">threshold: .300 • hop decay: .6 • max hops: 2</text>
+
+    <!-- Selected via graph -->
+    <rect x="1008" y="330" width="350" height="238" rx="14" class="bg"/><rect x="1008" y="330" width="350" height="238" rx="14" class="backend"/>
+    <text x="1034" y="362" class="title">7. Included via graph</text>
+    <text x="1034" y="383" class="small">2 associative neighbors selected</text>
+    <rect x="1036" y="420" width="294" height="54" rx="9" class="pillGreen"/><circle cx="1058" cy="443" r="9" class="selected"/><text x="1076" y="439" class="label">Tow/storage setup</text><text x="1076" y="457" class="tiny">role: associative • activation .477</text>
+    <rect x="1036" y="492" width="294" height="54" rx="9" class="pillGreen"/><circle cx="1058" cy="515" r="9" class="selected"/><text x="1076" y="511" class="label">Boat-shopping context</text><text x="1076" y="529" class="tiny">role: associative • activation .477</text>
+
+    <!-- Route to middle row -->
+    <path d="M1289 226 V284 H268 V330" class="flowA"/><text x="276" y="305" class="tiny">activation seeds</text>
+    <path d="M458 449 H532" class="flowA"/><text x="470" y="437" class="tiny">seed graph</text>
+    <path d="M934 449 H1008" class="flowE"/><text x="946" y="437" class="tiny">rescued</text>
+
+    <!-- Cut and reject panels -->
+    <rect x="168" y="668" width="340" height="136" rx="14" class="bg"/><rect x="168" y="668" width="340" height="136" rx="14" class="security"/>
+    <text x="194" y="700" class="title">8a. Cut graph neighbors</text>
+    <text x="194" y="724" class="small">Some edges fired but stayed out.</text>
+    <text x="194" y="748" class="tiny">regression/debug note: activation .280</text>
+    <text x="194" y="762" class="tiny">generic-method seed neighbor: .245</text>
+    <text x="194" y="782" class="tiny">reason: below_activation_threshold</text>
+
+    <rect x="552" y="668" width="340" height="136" rx="14" class="bg"/><rect x="552" y="668" width="340" height="136" rx="14" class="security"/>
+    <text x="578" y="700" class="title">8b. Rejected direct hits</text>
+    <text x="578" y="724" class="small">Memory-system/project records</text>
+    <text x="578" y="740" class="small">matched some words but were</text>
+    <text x="578" y="756" class="small">not relevant to the boat query.</text>
+    <text x="578" y="782" class="tiny">reasons: weak anchor, wrong facet, meta gate</text>
+
+    <rect x="936" y="668" width="340" height="136" rx="14" class="bg"/><rect x="936" y="668" width="340" height="136" rx="14" class="muted"/>
+    <text x="962" y="700" class="title">9. Final memory context</text>
+    <text x="962" y="724" class="small">Only the 2 rescued records</text>
+    <text x="962" y="740" class="small">are injected into the model.</text>
+    <text x="962" y="766" class="tiny">Large DB effect; small prompt footprint.</text>
+
+    <!-- Lower arrows routed in whitespace -->
+    <path d="M733 586 V626 H338 V668" class="flowR"/><text x="368" y="646" class="tiny">cut</text>
+    <path d="M733 586 V626 H722 V668" class="flowR"/><text x="728" y="646" class="tiny">rejected</text>
+    <path d="M1183 568 V626 H1106 V668" class="flowE"/><text x="1126" y="646" class="tiny">included</text>
+
+    <rect x="60" y="966" width="1324" height="36" rx="10" fill="rgba(15,23,42,.72)" stroke="#1e293b"/>
+    <circle cx="88" cy="984" r="7" class="seed"/><text x="104" y="988" class="tiny">activation seed</text>
+    <circle cx="226" cy="984" r="7" class="selected"/><text x="242" y="988" class="tiny">included associative neighbor</text>
+    <circle cx="446" cy="984" r="7" class="cut"/><text x="462" y="988" class="tiny">edge fired but cut</text>
+    <text x="704" y="988" class="small">Graph rescue path: strong anchored candidates become seeds, then related memories are activated into context.</text>
+  </svg>
+  </div>
+  <div class="cards">
+    <div class="card"><h3 style="color:#fbbf24">Activation seeds</h3><p>The direct reranker scored the useful boat/towing records too low, but the pre-rerank anchors were strong enough to let them seed graph traversal.</p></div>
+    <div class="card"><h3 style="color:#34d399">Graph rescue</h3><p>The graph followed a strong entity-overlap edge with strength .795 and activation .477, lifting two related records into the final context as associative neighbors.</p></div>
+    <div class="card"><h3 style="color:#fb7185">Noise control</h3><p>Other graph neighbors fired but stayed below the .300 activation threshold, and unrelated project/meta records were rejected before prompt injection.</p></div>
+  </div>
+  <footer>Live association-graph query path • generated from continuity_debug_retrieval • personal details generalized</footer>
+</div>
+</body>
+</html>

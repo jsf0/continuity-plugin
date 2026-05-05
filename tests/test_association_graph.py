@@ -618,3 +618,119 @@ def test_personal_boat_query_does_not_match_project_status_on_generic_words(tmp_
     )
 
     assert [candidate.record.id for candidate in debug["selected"]] == ["boat_context"]
+
+
+def test_software_framework_query_does_not_pull_hardware_records_via_graph(tmp_path):
+    store = ContinuityStore(tmp_path / "continuity.db")
+    store.migrate()
+    store.upsert_record(
+        _record(
+            "framework_hardware_seed",
+            "Framework Desktop Ryzen AI Max hardware arrived for local model experiments.",
+            title="Framework Desktop hardware",
+            tags=["hardware", "desktop"],
+            entities=["Framework Desktop", "Ryzen AI Max"],
+            kind="environment_fact",
+        )
+    )
+    store.upsert_record(
+        _record(
+            "framework_hardware_neighbor",
+            "Framework Desktop Secure Boot and BIOS settings affected OpenBSD USB boot.",
+            title="Framework Desktop OpenBSD boot",
+            tags=["hardware", "boot", "openbsd"],
+            entities=["Framework Desktop", "OpenBSD", "BIOS"],
+            kind="environment_fact",
+        )
+    )
+    store.upsert_association_edge(
+        "framework_hardware_seed",
+        "framework_hardware_neighbor",
+        strength=1.0,
+        edge_type="entity_overlap",
+    )
+
+    debug = ContinuityRetriever(
+        store,
+        reranker_backend=RejectingReranker(),
+        reranker_min_score=0.15,
+        association_enabled=True,
+        association_activation_threshold=0.3,
+        association_hop_decay=0.6,
+    ).debug_search("what API framework should we use?", limit=5)
+
+    assert debug["selected"] == []
+    assert debug["activation_trace"]["activation_seeds"] == []
+    rejected = {candidate.record.id: candidate for candidate in debug["rejected"]}
+    assert rejected["framework_hardware_seed"].rejected_reason in {
+        "facet_incompatible_candidate",
+        "facet_incompatible_activation_seed",
+        "weak_anchor_activation_seed",
+    }
+
+
+def test_personal_work_preference_query_retrieves_work_preferences_not_project_neighbors(
+    tmp_path,
+):
+    store = ContinuityStore(tmp_path / "continuity.db")
+    store.migrate()
+    store.upsert_record(
+        _record(
+            "work_prefs",
+            "Work prefs: methodical thorough correct; discuss changes before edits. Done means tests pass and docs are updated.",
+            title="Hermes user memory",
+            tags=["user_preference", "work_style"],
+            kind="user_preference",
+        )
+    )
+    store.upsert_record(
+        _record(
+            "continuity_status",
+            "Continuity memory retrieval work changed association graph behavior.",
+            title="Continuity memory status",
+            tags=["continuity", "retrieval", "work"],
+            kind="active_project_state",
+            scope_project="hermes-continuity-memory",
+        )
+    )
+    store.upsert_association_edge(
+        "work_prefs",
+        "continuity_status",
+        strength=0.95,
+        edge_type="tag_overlap",
+    )
+
+    debug = ContinuityRetriever(
+        store,
+        reranker_backend=RejectingReranker(),
+        reranker_min_score=0.15,
+        association_enabled=True,
+        association_activation_threshold=0.3,
+        association_hop_decay=0.6,
+    ).debug_search("how do I prefer you handle big code changes?", limit=5)
+
+    selected_ids = [candidate.record.id for candidate in debug["selected"]]
+    assert selected_ids == ["work_prefs"]
+
+
+def test_non_memory_query_does_not_match_continuity_eval_record_that_quotes_it(tmp_path):
+    store = ContinuityStore(tmp_path / "continuity.db")
+    store.migrate()
+    store.upsert_record(
+        _record(
+            "continuity_eval",
+            "Regression eval found `what API framework should we use?` must not retrieve Framework Desktop hardware memories.",
+            title="Continuity retrieval eval",
+            tags=["continuity", "retrieval", "regression"],
+            kind="active_project_state",
+            scope_project="hermes-continuity-memory",
+        )
+    )
+
+    debug = ContinuityRetriever(store, association_enabled=True).debug_search(
+        "what API framework should we use?", limit=5
+    )
+
+    assert debug["selected"] == []
+    rejected = {candidate.record.id: candidate for candidate in debug["rejected"]}
+    assert rejected["continuity_eval"].rejected_reason == "memory_system_record_without_meta_query"

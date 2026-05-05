@@ -53,7 +53,7 @@ add = json.loads(
         {
             "id": "r_phase8_smoke",
             "kind": "lesson_learned",
-            "title": "Phase 8 smoke test memory",
+            "title": "Phase 8 smoke check",
             "summary": "patch lint can falsely report Rust 2015 async errors; verify with cargo check.",
             "scope_project": ROOT.name,
             "tags": ["openbsd", "rust", "lint"],

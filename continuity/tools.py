@@ -5,6 +5,8 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
+from .config import DreamConfig
+from .dream import run_dream_cycle
 from .embeddings import VectorBackend
 from .models import ContextRecord, SkillLink, SourceRef
 from .reranking import RerankerBackend
@@ -205,6 +207,25 @@ CONTINUITY_REINDEX_VECTORS_SCHEMA: dict[str, object] = {
     },
 }
 
+CONTINUITY_DREAM_SCHEMA: dict[str, object] = {
+    "name": "continuity_dream",
+    "description": "Run an offline continuity memory dream cycle: report stale candidates or safely archive them.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "mode": {
+                "type": "string",
+                "description": "report, archive-safe, or archive-all-candidates. Defaults to configured dream mode.",
+            },
+            "limit": {
+                "type": "integer",
+                "description": "Maximum stale candidates to inspect/archive.",
+            },
+        },
+        "required": [],
+    },
+}
+
 ALL_TOOL_SCHEMAS = [
     CONTINUITY_STATUS_SCHEMA,
     CONTINUITY_SEARCH_SCHEMA,
@@ -217,6 +238,7 @@ ALL_TOOL_SCHEMAS = [
     CONTINUITY_DEBUG_RETRIEVAL_SCHEMA,
     CONTINUITY_ASSOCIATION_EDGES_SCHEMA,
     CONTINUITY_REINDEX_VECTORS_SCHEMA,
+    CONTINUITY_DREAM_SCHEMA,
 ]
 
 
@@ -447,6 +469,29 @@ def handle_restore(store: ContinuityStore, args: dict[str, Any]) -> dict[str, ob
         return {"success": False, "error": "id is required for continuity_restore"}
     restored = store.restore_record(record_id)
     return {"success": True, "restored": restored, "id": record_id}
+
+
+def handle_dream(
+    store: ContinuityStore,
+    args: dict[str, Any],
+    *,
+    config: DreamConfig,
+    stale_after_days: int = 180,
+) -> dict[str, object]:
+    limit = _bounded_int(
+        args.get("limit"),
+        default=config.max_archives_per_run,
+        minimum=1,
+        maximum=100,
+    )
+    mode = _optional_str(args.get("mode")) or config.mode
+    return run_dream_cycle(
+        store,
+        config,
+        mode=mode,
+        stale_after_days=stale_after_days,
+        limit=limit,
+    )
 
 
 def handle_prune_stale(

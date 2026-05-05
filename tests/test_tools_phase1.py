@@ -30,4 +30,5 @@ def test_provider_exposes_phase4_tool_schemas() -> None:
         "continuity_debug_retrieval",
         "continuity_association_edges",
         "continuity_reindex_vectors",
+        "continuity_dream",
     }

@@ -8,10 +8,12 @@ phases described in ``docs/SPEC.md``.
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Protocol
 
 from .config import ContinuityConfig
+from .dream import run_dream_cycle, should_run_scheduled_dream
 from .embeddings import VectorBackend, build_vector_backend, index_records
 from .extraction import extract_records_from_messages
 from .memory_mirror import build_mirrored_memory_record, mirrored_memory_record_id
@@ -27,6 +29,7 @@ from .tools import (
     handle_association_edges,
     handle_debug_retrieval,
     handle_delete,
+    handle_dream,
     handle_get,
     handle_prune_stale,
     handle_reindex_vectors,
@@ -109,6 +112,8 @@ class ContinuityProvider(MemoryProvider):
         self._reranker_backend = build_reranker_backend(self._config)
         index_records(self._vector_backend, self._store.list_records())
         self._initialized = True
+        if self._config.dream.enabled and self._config.dream.run_on_initialize:
+            self._maybe_run_scheduled_dream(now=datetime.now(UTC))
 
     def system_prompt_block(self) -> str:
         """Return continuity operating guidance plus optional pinned records."""
@@ -226,6 +231,8 @@ class ContinuityProvider(MemoryProvider):
             assistant_content=assistant_content,
             max_chars=self._config.observation_max_chars,
         )
+        if self._config.dream.enabled and self._config.dream.run_on_turn:
+            self._maybe_run_scheduled_dream(now=datetime.now(UTC))
 
     def on_session_end(self, messages: list[dict[str, Any]]) -> None:
         """Consolidate clear durable memories at session boundaries."""
@@ -302,6 +309,7 @@ class ContinuityProvider(MemoryProvider):
                 "continuity_debug_retrieval",
                 "continuity_association_edges",
                 "continuity_reindex_vectors",
+                "continuity_dream",
             }
             and self._store is None
         ):
@@ -365,6 +373,16 @@ class ContinuityProvider(MemoryProvider):
                     vector_backend=self._vector_backend,
                     backend_name=self._config.vector_backend,
                     model=self._config.embedding_model,
+                ),
+                ensure_ascii=False,
+            )
+        if tool_name == "continuity_dream" and self._store is not None:
+            return json.dumps(
+                handle_dream(
+                    self._store,
+                    args,
+                    config=self._config.dream,
+                    stale_after_days=self._config.stale_after_days,
                 ),
                 ensure_ascii=False,
             )
@@ -458,10 +476,39 @@ class ContinuityProvider(MemoryProvider):
             "phase": "phase-9-continuity-exclusive",
             "pinned_system_prompt_enabled": self._config.pinned_system_prompt.enabled,
             "pinned_system_prompt_max_chars": self._config.pinned_system_prompt.max_chars,
+            "dream_enabled": self._config.dream.enabled,
+            "dream_schedule": self._config.dream.schedule,
+            "dream_timezone": self._config.dream.timezone,
+            "dream_mode": self._config.dream.mode,
+            "dream_last_run_at": self._store.get_state("dream:last_run_at")
+            if self._store
+            else None,
         }
 
     def _project_display_name(self) -> str | None:
         return self._project.display_name if self._project else None
+
+    def _maybe_run_scheduled_dream(
+        self, *, now: datetime | None = None
+    ) -> dict[str, object] | None:
+        if not self._store or not self._config.dream.enabled:
+            return None
+        current_time = now or datetime.now(UTC)
+        last_run_at = self._store.get_state("dream:last_run_at")
+        if not should_run_scheduled_dream(
+            current_time,
+            self._config.dream.schedule,
+            last_run_at,
+            timezone_name=self._config.dream.timezone,
+        ):
+            return None
+        return run_dream_cycle(
+            self._store,
+            self._config.dream,
+            stale_after_days=self._config.stale_after_days,
+            limit=self._config.dream.max_archives_per_run,
+            now=current_time,
+        )
 
     def _records_missing_vectors(self) -> int:
         if not self._store or not self._vector_backend:

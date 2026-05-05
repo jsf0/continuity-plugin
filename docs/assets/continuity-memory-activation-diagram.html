@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Continuity Memory Activation Pipeline</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #020617;
+    --panel: #0f172a;
+    --text: #e2e8f0;
+    --muted: #94a3b8;
+    --cyan: #22d3ee;
+    --emerald: #34d399;
+    --violet: #a78bfa;
+    --amber: #fbbf24;
+    --rose: #fb7185;
+    --orange: #fb923c;
+    --slate: #64748b;
+  }
+  body {
+    margin: 0;
+    background: radial-gradient(circle at top left, rgba(34,211,238,.10), transparent 28%), var(--bg);
+    color: var(--text);
+    font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  }
+  .wrap { width: 1400px; margin: 0 auto; padding: 28px; box-sizing: border-box; }
+  header { display: flex; align-items: center; gap: 14px; margin-bottom: 18px; }
+  .pulse { width: 12px; height: 12px; border-radius: 50%; background: var(--emerald); box-shadow: 0 0 18px var(--emerald); }
+  h1 { font-size: 25px; margin: 0; letter-spacing: -0.03em; }
+  .subtitle { color: var(--muted); font-size: 12px; margin-top: 5px; }
+  .card { border: 1px solid #1e293b; border-radius: 18px; background: rgba(15, 23, 42, .72); box-shadow: 0 28px 80px rgba(0,0,0,.35); overflow: hidden; }
+  svg { display: block; width: 100%; height: auto; }
+  .caption-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-top: 16px; }
+  .info { border: 1px solid #1e293b; background: rgba(15, 23, 42, .72); border-radius: 14px; padding: 14px 16px; }
+  .info h3 { margin: 0 0 9px; font-size: 13px; }
+  .info p { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.55; }
+  footer { margin-top: 14px; color: #64748b; font-size: 10px; text-align: right; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="pulse"></div>
+    <div>
+      <h1>Continuity Memory Activation Pipeline</h1>
+      <div class="subtitle">Large external knowledge store → sparse, surgical activation → tiny context block for smaller models</div>
+    </div>
+  </header>
+
+  <div class="card">
+  <svg viewBox="0 0 1344 780" role="img" aria-label="Continuity memory activation pipeline diagram">
+    <defs>
+      <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+        <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#1e293b" stroke-width="0.5"/>
+      </pattern>
+      <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+        <path d="M0,0 L0,6 L9,3 z" fill="#64748b" />
+      </marker>
+      <marker id="arrowCyan" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+        <path d="M0,0 L0,6 L9,3 z" fill="#22d3ee" />
+      </marker>
+      <marker id="arrowEmerald" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+        <path d="M0,0 L0,6 L9,3 z" fill="#34d399" />
+      </marker>
+      <marker id="arrowAmber" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+        <path d="M0,0 L0,6 L9,3 z" fill="#fbbf24" />
+      </marker>
+      <filter id="glow"><feGaussianBlur stdDeviation="3" result="blur"/><feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+      <style>
+        .title{font:700 15px 'JetBrains Mono',monospace;fill:#e2e8f0}.label{font:600 12px 'JetBrains Mono',monospace;fill:#e2e8f0}.small{font:500 9px 'JetBrains Mono',monospace;fill:#94a3b8}.tiny{font:500 8px 'JetBrains Mono',monospace;fill:#94a3b8}.num{font:700 10px 'JetBrains Mono',monospace;fill:#020617}.flow{stroke:#64748b;stroke-width:2;fill:none;marker-end:url(#arrow)}.flowC{stroke:#22d3ee;stroke-width:2.4;fill:none;marker-end:url(#arrowCyan)}.flowE{stroke:#34d399;stroke-width:2.4;fill:none;marker-end:url(#arrowEmerald)}.flowA{stroke:#fbbf24;stroke-width:2.1;fill:none;marker-end:url(#arrowAmber);stroke-dasharray:7 5}.boxBg{fill:#0f172a}.db{fill:rgba(76,29,149,.42);stroke:#a78bfa;stroke-width:1.5}.backend{fill:rgba(6,78,59,.42);stroke:#34d399;stroke-width:1.5}.frontend{fill:rgba(8,51,68,.42);stroke:#22d3ee;stroke-width:1.5}.cloud{fill:rgba(120,53,15,.32);stroke:#fbbf24;stroke-width:1.5}.security{fill:rgba(136,19,55,.38);stroke:#fb7185;stroke-width:1.5}.bus{fill:rgba(251,146,60,.32);stroke:#fb923c;stroke-width:1.5}.external{fill:rgba(30,41,59,.62);stroke:#94a3b8;stroke-width:1.5}.boundary{fill:rgba(15,23,42,.24);stroke:#334155;stroke-width:1.2;stroke-dasharray:7 5}.selected{fill:#34d399;stroke:#bbf7d0;stroke-width:2;filter:url(#glow)}.candidate{fill:#22d3ee;stroke:#a5f3fc;stroke-width:1.3}.rejected{fill:#475569;stroke:#64748b;stroke-width:1}.stale{fill:#fb7185;stroke:#fecdd3;stroke-width:1.2}.archive{fill:#334155;stroke:#64748b;stroke-width:1;opacity:.6}
+      </style>
+    </defs>
+    <rect width="1344" height="780" fill="#020617"/>
+    <rect width="1344" height="780" fill="url(#grid)" opacity=".9"/>
+
+    <!-- Main sparse activation boundary -->
+    <rect x="24" y="30" width="1296" height="640" rx="16" class="boundary"/>
+    <text x="44" y="55" class="small">retrieval-time sparse activation: query-specific, bounded, inspectable</text>
+
+    <!-- User turn -->
+    <rect x="54" y="104" width="170" height="82" rx="9" class="boxBg"/>
+    <rect x="54" y="104" width="170" height="82" rx="9" class="frontend"/>
+    <text x="74" y="132" class="label">User turn</text>
+    <text x="74" y="151" class="small">“what matters</text>
+    <text x="74" y="164" class="small">for this task?”</text>
+
+    <!-- DB store -->
+    <rect x="54" y="262" width="278" height="300" rx="12" class="boxBg"/>
+    <rect x="54" y="262" width="278" height="300" rx="12" class="db"/>
+    <text x="78" y="292" class="title">Continuity DB</text>
+    <text x="78" y="311" class="small">large external knowledge store</text>
+    <text x="78" y="328" class="tiny">SQLite records + metadata + vectors + graph edges</text>
+
+    <!-- memory dots -->
+    <g transform="translate(80 352)">
+      <circle cx="0" cy="0" r="7" class="rejected"/><circle cx="26" cy="0" r="7" class="rejected"/><circle cx="52" cy="0" r="7" class="candidate"/><circle cx="78" cy="0" r="7" class="rejected"/><circle cx="104" cy="0" r="7" class="archive"/><circle cx="130" cy="0" r="7" class="rejected"/><circle cx="156" cy="0" r="7" class="selected"/><circle cx="182" cy="0" r="7" class="rejected"/><circle cx="208" cy="0" r="7" class="rejected"/>
+      <circle cx="0" cy="28" r="7" class="rejected"/><circle cx="26" cy="28" r="7" class="candidate"/><circle cx="52" cy="28" r="7" class="rejected"/><circle cx="78" cy="28" r="7" class="stale"/><circle cx="104" cy="28" r="7" class="rejected"/><circle cx="130" cy="28" r="7" class="selected"/><circle cx="156" cy="28" r="7" class="rejected"/><circle cx="182" cy="28" r="7" class="rejected"/><circle cx="208" cy="28" r="7" class="candidate"/>
+      <circle cx="0" cy="56" r="7" class="candidate"/><circle cx="26" cy="56" r="7" class="rejected"/><circle cx="52" cy="56" r="7" class="rejected"/><circle cx="78" cy="56" r="7" class="rejected"/><circle cx="104" cy="56" r="7" class="selected"/><circle cx="130" cy="56" r="7" class="rejected"/><circle cx="156" cy="56" r="7" class="archive"/><circle cx="182" cy="56" r="7" class="rejected"/><circle cx="208" cy="56" r="7" class="rejected"/>
+      <circle cx="0" cy="84" r="7" class="rejected"/><circle cx="26" cy="84" r="7" class="stale"/><circle cx="52" cy="84" r="7" class="rejected"/><circle cx="78" cy="84" r="7" class="candidate"/><circle cx="104" cy="84" r="7" class="rejected"/><circle cx="130" cy="84" r="7" class="rejected"/><circle cx="156" cy="84" r="7" class="candidate"/><circle cx="182" cy="84" r="7" class="rejected"/><circle cx="208" cy="84" r="7" class="rejected"/>
+    </g>
+    <text x="78" y="490" class="tiny">Kinds: user_preference, project_state, decision, lesson, env_fact…</text>
+    <text x="78" y="507" class="tiny">Metadata: scope, tags, entities, facets, trust, lifecycle status</text>
+    <text x="78" y="536" class="small">Most records stay dormant.</text>
+
+    <!-- Query analysis -->
+    <rect x="396" y="112" width="190" height="132" rx="10" class="boxBg"/>
+    <rect x="396" y="112" width="190" height="132" rx="10" class="backend"/>
+    <text x="420" y="139" class="label">1. Query analysis</text>
+    <text x="420" y="160" class="small">extract anchors</text>
+    <text x="420" y="176" class="small">• entities / tags</text>
+    <text x="420" y="192" class="small">• project scope</text>
+    <text x="420" y="208" class="small">• facets / intent</text>
+    <text x="420" y="224" class="small">• low-info gates</text>
+
+    <!-- Candidate generation -->
+    <rect x="396" y="292" width="190" height="150" rx="10" class="boxBg"/>
+    <rect x="396" y="292" width="190" height="150" rx="10" class="cloud"/>
+    <text x="420" y="319" class="label">2. Candidate gen</text>
+    <text x="420" y="340" class="small">cheap broad recall</text>
+    <text x="420" y="360" class="small">FTS keywords</text>
+    <text x="420" y="376" class="small">vectors</text>
+    <text x="420" y="392" class="small">tags/entities</text>
+    <text x="420" y="408" class="small">scope boosts</text>
+
+    <!-- Gates -->
+    <rect x="652" y="150" width="202" height="146" rx="10" class="boxBg"/>
+    <rect x="652" y="150" width="202" height="146" rx="10" class="security"/>
+    <text x="676" y="177" class="label">3. Precision gates</text>
+    <text x="676" y="198" class="small">remove bad context</text>
+    <text x="676" y="218" class="small">facet compatibility</text>
+    <text x="676" y="234" class="small">stale/archive filter</text>
+    <text x="676" y="250" class="small">weak-anchor rejection</text>
+    <text x="676" y="266" class="small">trust penalties</text>
+
+    <!-- Reranker -->
+    <rect x="652" y="346" width="202" height="112" rx="10" class="boxBg"/>
+    <rect x="652" y="346" width="202" height="112" rx="10" class="backend"/>
+    <text x="676" y="373" class="label">4. Reranker</text>
+    <text x="676" y="394" class="small">score query ↔ record</text>
+    <text x="676" y="414" class="small">prefer direct answers</text>
+    <text x="676" y="430" class="small">reject low confidence</text>
+
+    <!-- Association graph -->
+    <rect x="910" y="168" width="196" height="146" rx="10" class="boxBg"/>
+    <rect x="910" y="168" width="196" height="146" rx="10" class="bus"/>
+    <text x="934" y="195" class="label">5. Optional graph</text>
+    <text x="934" y="216" class="small">bounded spreading</text>
+    <text x="934" y="236" class="small">direct seeds</text>
+    <text x="934" y="252" class="small">activation seeds</text>
+    <text x="934" y="268" class="small">associated neighbors</text>
+    <text x="934" y="288" class="tiny">only when strongly anchored</text>
+
+    <!-- Budget packer -->
+    <rect x="910" y="372" width="196" height="112" rx="10" class="boxBg"/>
+    <rect x="910" y="372" width="196" height="112" rx="10" class="frontend"/>
+    <text x="934" y="399" class="label">6. Budget packer</text>
+    <text x="934" y="420" class="small">top-k compact records</text>
+    <text x="934" y="440" class="small">max_records / max_chars</text>
+    <text x="934" y="456" class="small">roles + scores + sources</text>
+
+    <!-- Activated set -->
+    <rect x="1160" y="148" width="118" height="384" rx="12" class="boxBg"/>
+    <rect x="1160" y="148" width="118" height="384" rx="12" class="frontend"/>
+    <text x="1178" y="176" class="label">Activated</text>
+    <text x="1178" y="192" class="small">working set</text>
+
+    <rect x="1176" y="222" width="86" height="58" rx="7" class="boxBg"/>
+    <rect x="1176" y="222" width="86" height="58" rx="7" fill="rgba(6,78,59,.62)" stroke="#34d399" stroke-width="1.4"/>
+    <text x="1196" y="246" class="small">record A</text><text x="1191" y="262" class="tiny">direct</text>
+    <rect x="1176" y="302" width="86" height="58" rx="7" class="boxBg"/>
+    <rect x="1176" y="302" width="86" height="58" rx="7" fill="rgba(6,78,59,.62)" stroke="#34d399" stroke-width="1.4"/>
+    <text x="1196" y="326" class="small">record B</text><text x="1187" y="342" class="tiny">reranked</text>
+    <rect x="1176" y="382" width="86" height="58" rx="7" class="boxBg"/>
+    <rect x="1176" y="382" width="86" height="58" rx="7" fill="rgba(251,146,60,.42)" stroke="#fb923c" stroke-width="1.4"/>
+    <text x="1196" y="406" class="small">record C</text><text x="1187" y="422" class="tiny">associated</text>
+    <text x="1178" y="482" class="tiny">1–5 records</text>
+    <text x="1178" y="498" class="tiny">~600–1800 chars</text>
+
+    <!-- Model context -->
+    <rect x="465" y="588" width="414" height="56" rx="10" class="boxBg"/>
+    <rect x="465" y="588" width="414" height="56" rx="10" class="external"/>
+    <text x="488" y="613" class="label">Injected &lt;memory-context&gt; block</text>
+    <text x="488" y="631" class="small">advisory background, not user instructions; current facts still verified with tools</text>
+
+    <!-- Small model -->
+    <rect x="944" y="572" width="238" height="86" rx="12" class="boxBg"/>
+    <rect x="944" y="572" width="238" height="86" rx="12" class="frontend"/>
+    <text x="970" y="602" class="label">Small / local model</text>
+    <text x="970" y="623" class="small">large memory effect</text>
+    <text x="970" y="639" class="small">without large prompt bloat</text>
+
+    <!-- Arrows -->
+    <path d="M224 145 C285 145 328 148 396 164" class="flowC"/>
+    <path d="M332 392 C356 392 370 385 396 372" class="flow"/>
+    <path d="M491 244 L491 292" class="flow"/>
+    <path d="M586 368 C616 350 632 292 652 250" class="flow"/>
+    <path d="M854 224 C884 224 888 226 910 234" class="flowA"/>
+    <path d="M753 296 L753 346" class="flow"/>
+    <path d="M854 403 C874 407 890 417 910 428" class="flow"/>
+    <path d="M1106 430 C1130 428 1142 422 1160 408" class="flowE"/>
+    <path d="M1106 240 C1134 250 1148 276 1160 318" class="flowA"/>
+    <path d="M1219 532 C1194 575 1128 611 1182 615" class="flowE"/>
+    <path d="M879 616 C900 616 919 616 944 616" class="flowC"/>
+
+    <!-- Legend -->
+    <g transform="translate(48 696)">
+      <rect x="0" y="0" width="1248" height="52" rx="10" fill="rgba(15,23,42,.65)" stroke="#1e293b"/>
+      <circle cx="28" cy="26" r="7" class="rejected"/><text x="44" y="30" class="tiny">dormant / not selected</text>
+      <circle cx="190" cy="26" r="7" class="candidate"/><text x="206" y="30" class="tiny">candidate</text>
+      <circle cx="300" cy="26" r="7" class="selected"/><text x="316" y="30" class="tiny">activated into context</text>
+      <circle cx="482" cy="26" r="7" class="stale"/><text x="498" y="30" class="tiny">stale/rejected</text>
+      <circle cx="618" cy="26" r="7" class="archive"/><text x="634" y="30" class="tiny">archived/excluded</text>
+      <text x="810" y="30" class="small" fill="#e2e8f0">Key idea: store broadly, route precisely, inject sparingly.</text>
+    </g>
+  </svg>
+  </div>
+
+  <div class="caption-grid">
+    <div class="info"><h3 style="color:#a78bfa">Large store</h3><p>Continuity can hold many compact records — preferences, decisions, project state, lessons, environment facts — without putting them all into every model prompt.</p></div>
+    <div class="info"><h3 style="color:#34d399">Sparse activation</h3><p>Query analysis, candidate generation, gates, reranking, and optional graph traversal choose only the records that matter for the current turn.</p></div>
+    <div class="info"><h3 style="color:#22d3ee">Small context</h3><p>The model receives a tiny advisory memory block, usually a handful of records, preserving context for the task, tools, code, and reasoning.</p></div>
+  </div>
+  <footer>Hermes Continuity Memory • MoE-style routing for agent memory</footer>
+</div>
+</body>
+</html>
