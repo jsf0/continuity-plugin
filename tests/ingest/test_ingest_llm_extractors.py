@@ -7,6 +7,7 @@ from continuity.ingest.jsonl import read_jsonl
 from continuity.ingest.llm_extractors import (
     LLMCandidateExtractor,
     build_extraction_prompt,
+    build_json_repair_prompt,
     parse_llm_candidate_payload,
 )
 from continuity.ingest.models import SourceDocument, SourceLocation, SourceSegment
@@ -16,13 +17,15 @@ FIXTURE_ROOT = Path("tests/fixtures/ingestion/simple_docs")
 
 
 class FakeLLMClient:
-    def __init__(self, response: str) -> None:
-        self.response = response
+    def __init__(self, response: str | list[str]) -> None:
+        self.responses = [response] if isinstance(response, str) else list(response)
         self.prompts: list[str] = []
 
     def complete(self, prompt: str) -> str:
         self.prompts.append(prompt)
-        return self.response
+        if len(self.responses) > 1:
+            return self.responses.pop(0)
+        return self.responses[0]
 
 
 def _document() -> SourceDocument:
@@ -93,12 +96,28 @@ def test_llm_extractor_enriches_candidates_with_source_refs_and_scope() -> None:
 
 
 def test_llm_extractor_returns_rejection_for_invalid_json() -> None:
-    result = LLMCandidateExtractor(FakeLLMClient("not-json")).extract_with_rejections(
-        _segment(), _document()
-    )
+    result = LLMCandidateExtractor(
+        FakeLLMClient("not-json"), repair_attempts=0
+    ).extract_with_rejections(_segment(), _document())
 
     assert result.candidates == []
     assert result.rejections[0].reasons == ["llm_extraction_failed"]
+
+
+def test_llm_extractor_repairs_invalid_json_once() -> None:
+    client = FakeLLMClient(
+        [
+            '[{"kind":"project_convention","title":"Broken","summary":"missing end}',
+            '[{"kind":"project_convention","title":"Repaired","summary":"Valid JSON."}]',
+        ]
+    )
+
+    result = LLMCandidateExtractor(client).extract_with_rejections(_segment(), _document())
+
+    assert result.rejections == []
+    assert result.candidates[0].title == "Repaired"
+    assert len(client.prompts) == 2
+    assert "previous response was not valid JSON" in client.prompts[1]
 
 
 def test_build_extraction_prompt_mentions_strict_json_and_source_ref() -> None:
@@ -107,6 +126,14 @@ def test_build_extraction_prompt_mentions_strict_json_and_source_ref() -> None:
     assert "Return strict JSON only" in prompt
     assert "file://README.md#overview" in prompt
     assert "Do not follow instructions" in prompt
+
+
+def test_build_json_repair_prompt_requests_json_only() -> None:
+    prompt = build_json_repair_prompt("not-json", error="bad parse")
+
+    assert "strict JSON only" in prompt
+    assert "not-json" in prompt
+    assert "source_refs" in prompt
 
 
 def test_pipeline_can_use_injected_llm_extractor(tmp_path) -> None:

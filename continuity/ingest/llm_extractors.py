@@ -60,16 +60,24 @@ class LLMCandidateExtractor:
 
     name = "llm-candidate-extractor"
 
-    def __init__(self, client: LLMClient, *, max_segment_chars: int = 6000) -> None:
+    def __init__(
+        self,
+        client: LLMClient,
+        *,
+        max_segment_chars: int = 6000,
+        repair_attempts: int = 1,
+    ) -> None:
         self.client = client
         self.max_segment_chars = max_segment_chars
+        self.repair_attempts = max(0, repair_attempts)
 
     def extract_with_rejections(
         self, segment: SourceSegment, document: SourceDocument
     ) -> LLMExtractionResult:
         prompt = build_extraction_prompt(segment, document, max_chars=self.max_segment_chars)
         try:
-            payload = parse_llm_candidate_payload(self.client.complete(prompt))
+            response = self.client.complete(prompt)
+            payload = self._parse_with_repair(response)
         except (RuntimeError, TimeoutError, json.JSONDecodeError, TypeError, ValueError) as exc:
             return LLMExtractionResult(
                 candidates=[],
@@ -104,6 +112,23 @@ class LLMCandidateExtractor:
         """Return only valid candidates for compatibility with deterministic extractors."""
 
         return self.extract_with_rejections(segment, document).candidates
+
+    def _parse_with_repair(self, response: str) -> list[dict[str, Any]]:
+        try:
+            return parse_llm_candidate_payload(response)
+        except (json.JSONDecodeError, TypeError, ValueError) as first_error:
+            last_error: Exception = first_error
+            repaired_response = response
+            for _ in range(self.repair_attempts):
+                repair_prompt = build_json_repair_prompt(repaired_response, error=str(last_error))
+                repaired_response = self.client.complete(repair_prompt)
+                try:
+                    return parse_llm_candidate_payload(repaired_response)
+                except (json.JSONDecodeError, TypeError, ValueError) as exc:
+                    last_error = exc
+            raise ValueError(
+                f"invalid JSON after {self.repair_attempts} repair attempt(s): {last_error}"
+            ) from last_error
 
 
 def build_extraction_prompt(
@@ -151,6 +176,26 @@ Source text:
 <<<SOURCE_TEXT
 {source_text}
 SOURCE_TEXT
+>>>"""
+
+
+def build_json_repair_prompt(invalid_response: str, *, error: str) -> str:
+    """Build a repair-only prompt for malformed LLM candidate JSON."""
+
+    return f"""The previous response was not valid JSON for the corpus-ingestion candidate schema.
+
+Error:
+{error}
+
+Convert the previous response into strict JSON only. Return either [] or a JSON array of objects.
+Each object must contain string fields: kind, title, summary.
+Optional fields: details, tags, entities, confidence, importance.
+Do not add commentary, markdown fences, or source_refs.
+
+Previous response:
+<<<INVALID_JSON
+{invalid_response[:12000]}
+INVALID_JSON
 >>>"""
 
 
