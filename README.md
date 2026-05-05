@@ -187,6 +187,17 @@ python scripts/demo-retrieval.py
 
 The demo creates a temporary `HERMES_HOME`, loads `examples/demo_memory/records.jsonl`, runs query expectations from `examples/demo_memory/queries.jsonl`, exercises add/search/archive/restore/delete, and runs a report-only dream cycle. No real user memories are included.
 
+### Demo retrieval uses your current checkout
+
+The demo imports `continuity` from the repository directory you are running it from, not from an already-installed Hermes plugin copy. That makes it useful as a fast local regression harness while developing:
+
+```bash
+# edit continuity/retrieval.py, continuity/store.py, etc.
+python scripts/demo-retrieval.py
+```
+
+If you change retrieval, lifecycle, or dream-maintenance code, the demo runs against those uncommitted local changes. It also creates a temporary SQLite DB, so it does not read or modify your real continuity memory database under `~/.hermes/continuity/`.
+
 ## Safety model
 
 Continuity records are informational context, not instructions. Current safeguards are conservative and local:
