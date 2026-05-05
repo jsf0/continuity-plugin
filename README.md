@@ -85,14 +85,47 @@ The installer copies the plugin package to:
 ${HERMES_HOME:-$HOME/.hermes}/plugins/continuity/
 ```
 
-Enable the provider in Hermes config:
+Add the provider to your main Hermes config, usually `~/.hermes/config.yaml`:
 
 ```yaml
 memory:
   provider: continuity
+  continuity:
+    max_records: 5
+    max_chars: 1800
+    min_score: 0.1
+    include_sources: true
+    include_scores: true
+
+    # Dependency-free local vectors. Good default for first install.
+    vector:
+      enabled: true
+      backend: sqlite-hash
+
+    # Optional: enable only after installing sentence-transformers deps.
+    reranker:
+      enabled: false
+      backend: none
+
+    association_graph:
+      enabled: true
+
+    # Disabled by default: continuity normally injects only per-query context.
+    pinned_system_prompt:
+      enabled: false
+      max_chars: 1200
+      max_records: 6
+
+    # Optional maintenance cycle. Manual `continuity_dream` works regardless;
+    # scheduled checks run only when Hermes initializes or processes turns.
+    dream:
+      enabled: false
+      schedule: "03:30"
+      timezone: "UTC"
+      mode: report
 ```
 
-Then restart Hermes or start a new session.
+`install.sh` deliberately does **not** edit your Hermes config. After adding the config, restart Hermes or start a new session.
 
 See [`docs/INSTALL.md`](docs/INSTALL.md) for detailed install and verification steps.
 

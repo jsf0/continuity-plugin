@@ -37,14 +37,53 @@ Preview without writing:
 
 ## Enable the provider
 
-Set Hermes memory provider to `continuity`:
+Edit your main Hermes config, usually:
+
+```bash
+$EDITOR ~/.hermes/config.yaml
+```
+
+Add or update the `memory` block:
 
 ```yaml
 memory:
   provider: continuity
+  continuity:
+    max_records: 5
+    max_chars: 1800
+    min_score: 0.1
+    include_sources: true
+    include_scores: true
+
+    # Dependency-free local vectors. Good default for first install.
+    vector:
+      enabled: true
+      backend: sqlite-hash
+
+    # Optional: enable only after installing sentence-transformers deps.
+    reranker:
+      enabled: false
+      backend: none
+
+    association_graph:
+      enabled: true
+
+    # Disabled by default: continuity normally injects only per-query context.
+    pinned_system_prompt:
+      enabled: false
+      max_chars: 1200
+      max_records: 6
+
+    # Optional maintenance cycle. Manual `continuity_dream` works regardless;
+    # scheduled checks run only when Hermes initializes or processes turns.
+    dream:
+      enabled: false
+      schedule: "03:30"
+      timezone: "UTC"
+      mode: report
 ```
 
-Then restart Hermes or start a new session.
+The installer deliberately does **not** edit this file. Then restart Hermes or start a new session.
 
 ## Verify installation
 
