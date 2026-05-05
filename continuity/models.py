@@ -16,6 +16,10 @@ ALLOWED_KINDS = frozenset(
         "session_summary",
         "artifact_summary",
         "procedure_candidate",
+        "codebase_fact",
+        "paper_finding",
+        "known_limitation",
+        "glossary_term",
         "open_question",
         "active_project_state",
     }
@@ -28,6 +32,11 @@ ALLOWED_TRUST_LEVELS = frozenset(
         "agent_observed",
         "session_extracted",
         "tool_observed",
+        "corpus_distilled",
+        "personal_note_distilled",
+        "internet_distilled",
+        "corpus_raw_summary",
+        "candidate_unreviewed",
         "remote_untrusted",
     }
 )
