@@ -243,8 +243,8 @@ def _enrich_candidate_dict(
         "scope_profile": item.get("scope_profile") or document.scope_profile,
         "tags": item.get("tags") or [],
         "entities": item.get("entities") or [],
-        "confidence": item.get("confidence", 0.65),
-        "importance": item.get("importance", 0.6),
+        "confidence": _probability(item.get("confidence"), 0.65),
+        "importance": _probability(item.get("importance"), 0.6),
         "trust_level": item.get("trust_level") or "corpus_distilled",
         "source_refs": [source_ref],
         "ingestion": {**_dict(item.get("ingestion")), "extractor": LLMCandidateExtractor.name},
@@ -269,3 +269,21 @@ def _source_ref(document: SourceDocument, segment: SourceSegment) -> SourceRef:
 
 def _dict(value: object) -> dict[str, Any]:
     return dict(value) if isinstance(value, dict) else {}
+
+
+def _probability(value: object, default: float) -> float:
+    if value is None:
+        return default
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        labels = {
+            "very low": 0.15,
+            "low": 0.3,
+            "medium": 0.6,
+            "moderate": 0.6,
+            "high": 0.85,
+            "very high": 0.95,
+        }
+        if normalized in labels:
+            return labels[normalized]
+    return float(value)

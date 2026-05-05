@@ -120,6 +120,19 @@ def test_llm_extractor_repairs_invalid_json_once() -> None:
     assert "previous response was not valid JSON" in client.prompts[1]
 
 
+def test_llm_extractor_accepts_textual_probability_labels() -> None:
+    client = FakeLLMClient(
+        '[{"kind":"project_convention","title":"Text labels","summary":"Textual labels are normalized.",'
+        '"confidence":"high","importance":"medium"}]'
+    )
+
+    result = LLMCandidateExtractor(client).extract_with_rejections(_segment(), _document())
+
+    assert result.rejections == []
+    assert result.candidates[0].confidence == 0.85
+    assert result.candidates[0].importance == 0.6
+
+
 def test_build_extraction_prompt_mentions_strict_json_and_source_ref() -> None:
     prompt = build_extraction_prompt(_segment(), _document())
 
