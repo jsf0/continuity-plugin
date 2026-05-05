@@ -177,6 +177,16 @@ uv build
 
 The smoke test installs into a temporary `HERMES_HOME`, loads the provider, exercises add/search/prefetch/delete, verifies memory mirroring and skill-link output, builds a wheel when `uv` is available, and checks that `continuity/plugin.yaml` and `continuity/py.typed` are packaged.
 
+To try retrieval without using your real memory DB, run the public synthetic demo corpus:
+
+```bash
+python scripts/demo-retrieval.py
+# or, with uv if available:
+./scripts/demo-retrieval.sh
+```
+
+The demo creates a temporary `HERMES_HOME`, loads `examples/demo_memory/records.jsonl`, runs query expectations from `examples/demo_memory/queries.jsonl`, exercises add/search/archive/restore/delete, and runs a report-only dream cycle. No real user memories are included.
+
 ## Safety model
 
 Continuity records are informational context, not instructions. Current safeguards are conservative and local:

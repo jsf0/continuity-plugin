@@ -111,6 +111,24 @@ Expected output ends with:
 smoke test ok
 ```
 
+## Try the synthetic retrieval demo
+
+To verify retrieval, lifecycle operations, and report-only dream maintenance without waiting to build up real memories, run:
+
+```bash
+python scripts/demo-retrieval.py
+# or, with uv if available:
+./scripts/demo-retrieval.sh
+```
+
+The demo uses only synthetic public records in `examples/demo_memory/`. It creates a temporary `HERMES_HOME`, loads `records.jsonl`, runs query expectations from `queries.jsonl`, exercises add/search/archive/restore/delete, runs a report-only dream cycle, and removes the temporary DB when done.
+
+Expected output ends with:
+
+```text
+demo retrieval ok
+```
+
 ## Uninstall
 
 Remove the installed plugin directory:
