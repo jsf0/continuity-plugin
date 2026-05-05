@@ -79,6 +79,7 @@ def write_review_artifacts(
     candidates: list[CandidateRecord],
     rejections: list[Rejection],
     policy: ReviewPolicy,
+    raw_candidates: list[CandidateRecord] | None = None,
 ) -> ReviewResult:
     """Split candidates by review policy and write JSONL/Markdown artifacts."""
 
@@ -102,7 +103,8 @@ def write_review_artifacts(
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
     write_jsonl(
-        output_path / "candidate-records.jsonl", [candidate.to_dict() for candidate in candidates]
+        output_path / "candidate-records.jsonl",
+        [candidate.to_dict() for candidate in raw_candidates or candidates],
     )
     write_jsonl(
         output_path / "merged-records.jsonl", [candidate.to_dict() for candidate in candidates]

@@ -74,6 +74,8 @@ def test_cli_run_writes_dry_run_artifacts(tmp_path) -> None:
             "2026-05-05T18:00:00Z",
             "--include",
             "README.md",
+            "--policy",
+            "safe-auto",
             "--output",
             str(output_dir),
         ]
@@ -83,7 +85,12 @@ def test_cli_run_writes_dry_run_artifacts(tmp_path) -> None:
     manifest = json.loads((output_dir / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["run_id"] == "cli-run"
     assert manifest["source_count"] == 1
+    assert manifest["candidate_count"] == 1
+    assert manifest["approved_count"] == 1
     assert (output_dir / "segments.jsonl").exists()
+    assert (output_dir / "candidate-records.jsonl").exists()
+    assert read_jsonl(output_dir / "approved-records.jsonl")[0]["kind"] == "artifact_summary"
+    assert read_jsonl(output_dir / "retrieval-evals.jsonl")[0]["expected_record_titles"]
     assert (output_dir / "import-report.md").exists()
 
 

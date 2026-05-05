@@ -25,7 +25,8 @@ def render_dry_run_report(manifest: IngestionRunManifest) -> str:
             f"Imported records: {manifest.imported_count}",
             f"Rejected items: {manifest.rejected_count}",
             "",
-            "No candidate extraction or import was performed in this dry-run stage.",
+            "Candidate extraction, validation, dedupe, review splitting, and eval generation were performed.",
+            "No records were imported; apply approved records explicitly with the import command.",
             "",
         ]
     )

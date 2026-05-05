@@ -54,6 +54,7 @@ def _build_parser() -> argparse.ArgumentParser:
     run.add_argument("--project")
     run.add_argument("--repo")
     run.add_argument("--collection")
+    run.add_argument("--policy", default="conservative")
     run.add_argument("--output", required=True)
     run.set_defaults(func=_cmd_run)
 
@@ -122,6 +123,7 @@ def _cmd_run(args: argparse.Namespace) -> None:
         project=args.project,
         repo=args.repo,
         collection=args.collection,
+        review_policy=args.policy,
     )
 
 

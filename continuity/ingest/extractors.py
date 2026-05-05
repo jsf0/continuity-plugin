@@ -41,7 +41,7 @@ class ProjectCapsuleExtractor:
                 scope_profile=document.scope_profile,
                 tags=["project-capsule", "corpus-ingestion"],
                 entities=[project],
-                confidence=0.72,
+                confidence=0.76,
                 importance=0.78,
                 trust_level="corpus_distilled",
                 source_refs=[_source_ref(document, segment)],

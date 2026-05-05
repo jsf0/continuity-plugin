@@ -4,21 +4,32 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
 from continuity.ingest.connectors import LocalFilesConnector
+from continuity.ingest.dedupe import BasicDeduper
+from continuity.ingest.eval import EvalCase, generate_eval_case
+from continuity.ingest.extractors import (
+    CodeOrConfigFactExtractor,
+    ProcedureCandidateExtractor,
+    ProjectCapsuleExtractor,
+)
 from continuity.ingest.jsonl import write_jsonl
 from continuity.ingest.models import (
+    CandidateRecord,
     IngestionRunManifest,
+    Rejection,
     SourceDocument,
     SourceSegment,
     stable_hash,
 )
 from continuity.ingest.parsers import parser_for_document
 from continuity.ingest.reports import render_dry_run_report
+from continuity.ingest.review import ReviewPolicy, ReviewResult, write_review_artifacts
 from continuity.ingest.segmenters import HeadingSectionSegmenter
+from continuity.ingest.validation import CandidateNormalizer, SafetyGate
 
 _PARSEABLE_SOURCE_TYPES = {"markdown", "rst", "text"}
 
@@ -31,10 +42,15 @@ class PipelineResult:
     manifest: IngestionRunManifest
     documents: list[SourceDocument]
     segments: list[SourceSegment]
+    candidates: list[CandidateRecord] = field(default_factory=list)
+    merged_candidates: list[CandidateRecord] = field(default_factory=list)
+    rejections: list[Rejection] = field(default_factory=list)
+    review_result: ReviewResult | None = None
+    eval_cases: list[EvalCase] = field(default_factory=list)
 
 
 class IngestionPipeline:
-    """Coordinate source discovery, parsing, segmentation, and artifact writing."""
+    """Coordinate discovery, extraction, review, and dry-run artifact writing."""
 
     def __init__(self, *, connector: LocalFilesConnector | None = None) -> None:
         self.connector = connector or LocalFilesConnector()
@@ -52,8 +68,14 @@ class IngestionPipeline:
         project: str | None = None,
         repo: str | None = None,
         collection: str | None = None,
+        review_policy: str = "conservative",
     ) -> PipelineResult:
-        """Run the dry inventory/parse/segment phase and write JSONL artifacts."""
+        """Run a dry corpus ingestion pipeline and write review-first artifacts.
+
+        Despite the historical method name, this remains a dry run: it performs
+        discovery, parsing, segmentation, deterministic extraction, validation,
+        dedupe, review splitting, and eval generation, but never imports records.
+        """
 
         root_paths = [Path(root) for root in roots]
         output_path = Path(output_dir)
@@ -69,9 +91,76 @@ class IngestionPipeline:
                 "project": project,
                 "repo": repo,
                 "collection": collection,
+                "review_policy": review_policy,
             }
         )
 
+        documents = self._discover_documents(
+            root_paths,
+            include=include,
+            exclude=exclude,
+            project=project,
+            repo=repo,
+            collection=collection,
+        )
+        segments = self._segment_documents(documents)
+        candidates, rejections = self._extract_and_validate(documents, segments)
+        dedupe_result = BasicDeduper().dedupe(candidates)
+        all_rejections = [*rejections, *dedupe_result.rejections]
+        review_result = write_review_artifacts(
+            output_path,
+            candidates=dedupe_result.accepted,
+            raw_candidates=candidates,
+            rejections=all_rejections,
+            policy=ReviewPolicy(review_policy),
+        )
+        eval_cases = [generate_eval_case(candidate) for candidate in review_result.approved]
+
+        manifest = IngestionRunManifest(
+            run_id=effective_run_id,
+            created_at=timestamp,
+            recipe=recipe,
+            input_roots=[str(root) for root in root_paths],
+            config_hash=config_hash,
+            source_count=len(documents),
+            segment_count=len(segments),
+            candidate_count=len(candidates),
+            approved_count=len(review_result.approved),
+            imported_count=0,
+            rejected_count=len(all_rejections),
+            output_dir=str(output_path),
+        )
+
+        _write_manifest(output_path / "manifest.json", manifest)
+        write_jsonl(output_path / "inventory.jsonl", [document.to_dict() for document in documents])
+        write_jsonl(output_path / "segments.jsonl", [segment.to_dict() for segment in segments])
+        write_jsonl(output_path / "retrieval-evals.jsonl", [case.to_dict() for case in eval_cases])
+        (output_path / "import-report.md").write_text(
+            render_dry_run_report(manifest), encoding="utf-8"
+        )
+
+        return PipelineResult(
+            output_dir=output_path,
+            manifest=manifest,
+            documents=documents,
+            segments=segments,
+            candidates=candidates,
+            merged_candidates=dedupe_result.accepted,
+            rejections=all_rejections,
+            review_result=review_result,
+            eval_cases=eval_cases,
+        )
+
+    def _discover_documents(
+        self,
+        root_paths: list[Path],
+        *,
+        include: Iterable[str] | None,
+        exclude: Iterable[str] | None,
+        project: str | None,
+        repo: str | None,
+        collection: str | None,
+    ) -> list[SourceDocument]:
         documents: list[SourceDocument] = []
         for root in root_paths:
             documents.extend(
@@ -86,41 +175,52 @@ class IngestionPipeline:
                 )
                 if document.source_type in _PARSEABLE_SOURCE_TYPES
             )
+        return documents
 
+    def _segment_documents(self, documents: list[SourceDocument]) -> list[SourceSegment]:
         segments: list[SourceSegment] = []
         segmenter = HeadingSectionSegmenter()
         for document in documents:
             parsed = parser_for_document(document).parse(document)
             segments.extend(segmenter.segment(parsed, document))
+        return segments
 
-        manifest = IngestionRunManifest(
-            run_id=effective_run_id,
-            created_at=timestamp,
-            recipe=recipe,
-            input_roots=[str(root) for root in root_paths],
-            config_hash=config_hash,
-            source_count=len(documents),
-            segment_count=len(segments),
-            candidate_count=0,
-            approved_count=0,
-            imported_count=0,
-            rejected_count=0,
-            output_dir=str(output_path),
-        )
+    def _extract_and_validate(
+        self,
+        documents: list[SourceDocument],
+        segments: list[SourceSegment],
+    ) -> tuple[list[CandidateRecord], list[Rejection]]:
+        document_by_id = {document.source_id: document for document in documents}
+        extractors = [
+            ProjectCapsuleExtractor(),
+            ProcedureCandidateExtractor(),
+            CodeOrConfigFactExtractor(),
+        ]
+        normalizer = CandidateNormalizer()
+        safety_gate = SafetyGate()
+        candidates: list[CandidateRecord] = []
+        rejections: list[Rejection] = []
 
-        _write_manifest(output_path / "manifest.json", manifest)
-        write_jsonl(output_path / "inventory.jsonl", [document.to_dict() for document in documents])
-        write_jsonl(output_path / "segments.jsonl", [segment.to_dict() for segment in segments])
-        (output_path / "import-report.md").write_text(
-            render_dry_run_report(manifest), encoding="utf-8"
-        )
-
-        return PipelineResult(
-            output_dir=output_path,
-            manifest=manifest,
-            documents=documents,
-            segments=segments,
-        )
+        for segment in segments:
+            document = document_by_id.get(segment.source_id)
+            if document is None:
+                rejections.append(
+                    Rejection(
+                        item_id=segment.segment_id,
+                        item_type="source_segment",
+                        reasons=["missing_source_document"],
+                    )
+                )
+                continue
+            for extractor in extractors:
+                for raw_candidate in extractor.extract(segment, document):
+                    normalized = normalizer.normalize(raw_candidate)
+                    rejection = safety_gate.assess(normalized)
+                    if rejection is not None:
+                        rejections.append(rejection)
+                    else:
+                        candidates.append(normalized)
+        return candidates, rejections
 
 
 def run_dry_inventory_and_segment(
@@ -135,6 +235,7 @@ def run_dry_inventory_and_segment(
     project: str | None = None,
     repo: str | None = None,
     collection: str | None = None,
+    review_policy: str = "conservative",
 ) -> PipelineResult:
     """Convenience wrapper for the default ingestion pipeline."""
 
@@ -149,6 +250,7 @@ def run_dry_inventory_and_segment(
         project=project,
         repo=repo,
         collection=collection,
+        review_policy=review_policy,
     )
 
 
