@@ -78,10 +78,16 @@ def test_markdown_parser_classifies_code_fence_blocks(tmp_path) -> None:
     assert code_blocks[0].location.line_end == 5
 
 
-def test_text_parser_emits_line_and_blank_blocks() -> None:
-    path = FIXTURE_ROOT / "notes.txt"
+def test_text_parser_emits_line_and_blank_blocks(tmp_path) -> None:
+    path = tmp_path / "notes.txt"
     path.write_text("First line\n\nSecond line\n", encoding="utf-8")
-    document = _document("notes.txt", "text")
+    document = SourceDocument(
+        source_id="file://notes.txt",
+        source_type="text",
+        uri="file://notes.txt",
+        title="notes.txt",
+        metadata={"path": str(path), "relative_path": "notes.txt"},
+    )
 
     parsed = TextParser().parse(document)
 

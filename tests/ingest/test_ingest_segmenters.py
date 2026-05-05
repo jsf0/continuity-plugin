@@ -45,10 +45,16 @@ def test_heading_section_segmenter_groups_markdown_under_headings_with_source_lo
     assert segments[1].scope_project == "continuity-ingestion-fixture"
 
 
-def test_heading_section_segmenter_falls_back_to_whole_document_without_headings() -> None:
-    path = FIXTURE_ROOT / "plain.txt"
+def test_heading_section_segmenter_falls_back_to_whole_document_without_headings(tmp_path) -> None:
+    path = tmp_path / "plain.txt"
     path.write_text("alpha\nbeta\ngamma\n", encoding="utf-8")
-    document = _document("plain.txt", "text")
+    document = SourceDocument(
+        source_id="file://plain.txt",
+        source_type="text",
+        uri="file://plain.txt",
+        title="plain.txt",
+        metadata={"path": str(path), "relative_path": "plain.txt"},
+    )
     parsed = TextParser().parse(document)
 
     segments = list(HeadingSectionSegmenter().segment(parsed, document))
@@ -62,10 +68,16 @@ def test_heading_section_segmenter_falls_back_to_whole_document_without_headings
     assert segments[0].location.line_end == 3
 
 
-def test_fixed_window_segmenter_splits_blocks_into_line_bounded_windows() -> None:
-    path = FIXTURE_ROOT / "window.txt"
+def test_fixed_window_segmenter_splits_blocks_into_line_bounded_windows(tmp_path) -> None:
+    path = tmp_path / "window.txt"
     path.write_text("one\ntwo\nthree\nfour\nfive\n", encoding="utf-8")
-    document = _document("window.txt", "text")
+    document = SourceDocument(
+        source_id="file://window.txt",
+        source_type="text",
+        uri="file://window.txt",
+        title="window.txt",
+        metadata={"path": str(path), "relative_path": "window.txt"},
+    )
     parsed = TextParser().parse(document)
 
     segments = list(FixedWindowSegmenter(max_lines=2).segment(parsed, document))
