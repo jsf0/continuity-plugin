@@ -480,6 +480,23 @@ class ContinuityProvider(MemoryProvider):
                 self._config.association_graph.activation_threshold
             ),
             "association_max_hops": self._config.association_graph.max_hops,
+            "retrieval_gates": {
+                "min_base_relevance": self._config.retrieval_gates.min_base_relevance,
+                "min_vector_relevance": self._config.retrieval_gates.min_vector_relevance,
+                "min_vector_only_relevance": (
+                    self._config.retrieval_gates.min_vector_only_relevance
+                ),
+                "weak_vector_only": self._config.retrieval_gates.weak_vector_only,
+                "facet_compatibility": self._config.retrieval_gates.facet_compatibility,
+                "memory_meta": self._config.retrieval_gates.memory_meta,
+                "low_information": self._config.retrieval_gates.low_information,
+                "project_status_anchor": self._config.retrieval_gates.project_status_anchor,
+                "personal_project": self._config.retrieval_gates.personal_project,
+                "activation_anchor": self._config.retrieval_gates.activation_anchor,
+                "strong_personal_anchor_reranker_bypass": (
+                    self._config.retrieval_gates.strong_personal_anchor_reranker_bypass
+                ),
+            },
             "phase": "phase-9-continuity-exclusive",
             "pinned_system_prompt_enabled": self._config.pinned_system_prompt.enabled,
             "pinned_system_prompt_max_chars": self._config.pinned_system_prompt.max_chars,

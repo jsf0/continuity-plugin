@@ -316,7 +316,23 @@ Default: `2`.
 
 The `retrieval_gates` block controls conservative filters that run after candidate generation and before final context injection. Defaults are intentionally precision-first: it is better for continuity to return no memory than to inject a plausible but wrong memory.
 
-Use `continuity_debug_retrieval(query="...", limit=5)` before changing these values. Look at `rejected[].rejected_reason`, `selected[].reasons`, scores, and `activation_trace.cut_neighbors[].reason`; tune one setting at a time and then rerun regression/demo queries.
+Use `continuity_debug_retrieval(query="...", limit=5)` before changing these values. Look at `rejected[].rejected_reason`, `rejected[].tuning_advice`, `selected[].reasons`, scores, and `activation_trace.cut_neighbors[].reason`; tune one setting at a time and then rerun regression/demo queries.
+
+Example debug excerpt:
+
+```json
+{
+  "id": "r_soft_debug_match",
+  "rejected_reason": "below_min_base_relevance",
+  "base_relevance": 1.35,
+  "tuning_advice": {
+    "config": "retrieval_gates.min_base_relevance",
+    "try": "If this record should match, lower this threshold slightly or add stronger tags/entities. If weak one-word matches are noisy, raise it."
+  }
+}
+```
+
+That means the record had some lexical/metadata evidence, but not enough to pass the direct retrieval gate. For a true positive, add better tags/entities or lower `retrieval_gates.min_base_relevance` slightly; for a noisy one-word match, raise it.
 
 ### `retrieval_gates.min_base_relevance`
 

@@ -198,9 +198,15 @@ To try retrieval without using your real memory DB, run the public synthetic dem
 python scripts/demo-retrieval.py
 # or, with uv if available:
 ./scripts/demo-retrieval.sh
+
+# Show the exact compact memory block a small model would receive
+# for a synthetic before/after continuity prompt:
+python scripts/demo-small-model-context.py
 ```
 
 The demo creates a temporary `HERMES_HOME`, loads `examples/demo_memory/records.jsonl`, runs query expectations from `examples/demo_memory/queries.jsonl`, exercises add/search/archive/restore/delete, and runs a report-only dream cycle. No real user memories are included.
+
+`demo-small-model-context.py` is not a model benchmark and does not call an LLM. It is a reproducible prompt-context demonstration: the same synthetic question has zero project memory without continuity and one compact retrieved record with continuity, showing the bounded context that a smaller model would see before answering.
 
 ### Demo retrieval uses your current checkout
 

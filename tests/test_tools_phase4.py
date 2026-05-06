@@ -237,3 +237,33 @@ def test_continuity_quality_report_can_recompute_and_apply_quality_backfill(
     assert dict(before)["entities_json"] == dict(after)["entities_json"]
     assert dict(before)["embedding_text"] == dict(after)["embedding_text"]
     assert dict(after)["quality_json"] != "{}"
+
+
+def test_debug_retrieval_includes_plain_english_tuning_advice(tmp_path: Path) -> None:
+    provider = ContinuityProvider()
+    provider.initialize(
+        session_id="debug-advice",
+        hermes_home=str(tmp_path),
+        continuity_config={"retrieval_gates": {"min_base_relevance": 2.0}},
+    )
+    call(
+        provider,
+        "continuity_add",
+        {
+            "id": "r_soft_debug_match",
+            "kind": "lesson_learned",
+            "title": "soft debug match",
+            "summary": "zebra appears once in this otherwise generic note.",
+        },
+    )
+
+    debug = call(provider, "continuity_debug_retrieval", {"query": "zebra", "limit": 3})
+
+    assert debug["success"] is True
+    rejected = {item["id"]: item for item in debug["rejected"]}
+    assert rejected["r_soft_debug_match"]["rejected_reason"] == "below_min_base_relevance"
+    assert rejected["r_soft_debug_match"]["tuning_advice"]["config"] == (
+        "retrieval_gates.min_base_relevance"
+    )
+    assert "lower" in rejected["r_soft_debug_match"]["tuning_advice"]["try"].lower()
+    assert debug["tuning_advice"][0]["reason"] == "below_min_base_relevance"

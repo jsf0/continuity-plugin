@@ -19,6 +19,7 @@ uv run ruff check .
 uv run pytest tests/ -q
 python -m compileall continuity tests scripts
 ./scripts/demo-retrieval.sh --quiet
+python scripts/demo-small-model-context.py
 ./scripts/smoke-test.sh
 uv build
 ```

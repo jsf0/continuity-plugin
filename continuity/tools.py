@@ -12,7 +12,12 @@ from .models import ContextRecord, SkillLink, SourceRef
 from .quality_backfill import apply_quality_backfill, build_quality_backfill_report
 from .record_quality import enrich_record_metadata
 from .reranking import RerankerBackend
-from .retrieval import ContinuityRetriever, RetrievalHit, candidate_to_debug_dict
+from .retrieval import (
+    ContinuityRetriever,
+    RetrievalHit,
+    candidate_to_debug_dict,
+    tuning_advice_for_reason,
+)
 from .staleness import find_stale_candidates
 from .store import ContinuityStore
 
@@ -429,15 +434,42 @@ def handle_debug_retrieval(
         limit=limit,
         include_stale=_bool(args.get("include_stale"), False),
     )
+    rejected_items = [candidate_to_debug_dict(item) for item in debug["rejected"]]
+    activation_trace = debug.get("activation_trace", {})
     return {
         "success": True,
         "query": query,
         "tokens": debug["tokens"],
         "expanded_tokens": debug["expanded_tokens"],
         "selected": [candidate_to_debug_dict(item) for item in debug["selected"]],
-        "rejected": [candidate_to_debug_dict(item) for item in debug["rejected"]],
-        "activation_trace": debug.get("activation_trace", {}),
+        "rejected": rejected_items,
+        "activation_trace": activation_trace,
+        "tuning_advice": _collect_tuning_advice(rejected_items, activation_trace),
     }
+
+
+def _collect_tuning_advice(
+    rejected_items: list[dict[str, object]], activation_trace: object
+) -> list[dict[str, str]]:
+    seen: set[str] = set()
+    advice: list[dict[str, str]] = []
+
+    def add_reason(reason: object) -> None:
+        if not isinstance(reason, str) or reason in seen:
+            return
+        item = tuning_advice_for_reason(reason)
+        if item is None:
+            return
+        seen.add(reason)
+        advice.append(item)
+
+    for item in rejected_items:
+        add_reason(item.get("rejected_reason"))
+    if isinstance(activation_trace, dict):
+        for item in activation_trace.get("cut_neighbors", []):
+            if isinstance(item, dict):
+                add_reason(item.get("reason"))
+    return advice
 
 
 def handle_quality_report(store: ContinuityStore, args: dict[str, Any]) -> dict[str, object]:

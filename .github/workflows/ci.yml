@@ -51,6 +51,9 @@ jobs:
       - name: Run synthetic retrieval demo
         run: ./scripts/demo-retrieval.sh --quiet
 
+      - name: Run small-model context demo
+        run: uv run python scripts/demo-small-model-context.py
+
       - name: Run isolated plugin smoke test
         run: ./scripts/smoke-test.sh
 

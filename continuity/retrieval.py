@@ -1277,7 +1277,7 @@ def _singularize(token: str) -> str:
 def candidate_to_debug_dict(candidate: CandidateScore) -> dict[str, object]:
     """Serialize a candidate score for debug tooling."""
 
-    return {
+    payload = {
         "id": candidate.record.id,
         "kind": candidate.record.kind,
         "title": candidate.record.title,
@@ -1301,3 +1301,81 @@ def candidate_to_debug_dict(candidate: CandidateScore) -> dict[str, object]:
         "reasons": list(dict.fromkeys(candidate.reasons)),
         "rejected_reason": candidate.rejected_reason,
     }
+    advice = tuning_advice_for_reason(candidate.rejected_reason)
+    if advice is not None:
+        payload["tuning_advice"] = advice
+    return payload
+
+
+def tuning_advice_for_reason(reason: str | None) -> dict[str, str] | None:
+    """Return plain-English tuning advice for a debug rejection/cut reason."""
+    if not reason:
+        return None
+    advice_by_reason = {
+        "below_min_base_relevance": {
+            "reason": reason,
+            "config": "retrieval_gates.min_base_relevance",
+            "try": "If this record should match, lower this threshold slightly or add stronger tags/entities. If weak one-word matches are noisy, raise it.",
+        },
+        "weak_vector_only_without_anchor": {
+            "reason": reason,
+            "config": "retrieval_gates.min_vector_only_relevance or retrieval_gates.weak_vector_only",
+            "try": "If vector-only paraphrases are useful, lower min_vector_only_relevance slightly. If vector noise is the problem, raise it or keep weak_vector_only enabled.",
+        },
+        "facet_incompatible_candidate": {
+            "reason": reason,
+            "config": "retrieval_gates.facet_compatibility",
+            "try": "If this is truly relevant, improve record tags/entities or temporarily disable this gate to confirm. Keep it enabled for polysemous terms like software Framework vs hardware Framework.",
+        },
+        "facet_incompatible_activation_seed": {
+            "reason": reason,
+            "config": "retrieval_gates.facet_compatibility",
+            "try": "If graph rescue should cross this domain boundary, improve tags/entities or test with facet_compatibility disabled. Keep enabled when unrelated domains bleed together.",
+        },
+        "memory_system_record_without_meta_query": {
+            "reason": reason,
+            "config": "retrieval_gates.memory_meta",
+            "try": "If this was meant to ask about continuity/memory, use explicit terms like continuity, retrieval, or memory provider. Disable only for diagnostics.",
+        },
+        "memory_system_neighbor_without_meta_query": {
+            "reason": reason,
+            "config": "retrieval_gates.memory_meta",
+            "try": "If graph neighbors from memory-system records are desired, make the query explicitly memory-related. Keep this enabled to avoid implementation-status noise.",
+        },
+        "low_information_direct_query": {
+            "reason": reason,
+            "config": "retrieval_gates.low_information",
+            "try": "Add a durable project/entity word to the query. Disable only if short local commands are intentionally meaningful in your workflow.",
+        },
+        "low_information_query_activation_seed": {
+            "reason": reason,
+            "config": "retrieval_gates.low_information",
+            "try": "Add a concrete anchor before relying on association graph rescue. Keep enabled if vague follow-ups pull stale context.",
+        },
+        "weak_project_status_candidate": {
+            "reason": reason,
+            "config": "retrieval_gates.project_status_anchor",
+            "try": "Add project-specific tags/entities or mention the project in the query. Disable only for trusted, scoped deployments.",
+        },
+        "personal_project_candidate_mismatch": {
+            "reason": reason,
+            "config": "retrieval_gates.personal_project",
+            "try": "Add the relevant project/entity name if a personal query should retrieve project state. Keep enabled if preferences pull roadmap noise.",
+        },
+        "weak_anchor_activation_seed": {
+            "reason": reason,
+            "config": "retrieval_gates.activation_anchor",
+            "try": "Improve tags/entities on the seed record first. Disable only when testing graph rescue on a clean corpus.",
+        },
+        "below_min_reranker_score": {
+            "reason": reason,
+            "config": "reranker.min_score or retrieval_gates.strong_personal_anchor_reranker_bypass",
+            "try": "Lower reranker.min_score if the reranker is too strict. For strongly tagged personal facts, keep the personal-anchor bypass enabled.",
+        },
+        "below_activation_threshold": {
+            "reason": reason,
+            "config": "association_graph.activation_threshold or association_graph.hop_decay",
+            "try": "Lower activation_threshold or raise hop_decay if graph rescue is too quiet. Raise them if graph traversal fans out too broadly.",
+        },
+    }
+    return advice_by_reason.get(reason)

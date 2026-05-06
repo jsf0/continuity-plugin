@@ -71,3 +71,24 @@ def test_phase1_prefetch_is_noop_until_retrieval_phase(tmp_path: Path) -> None:
     provider.initialize(session_id="session-123", hermes_home=str(tmp_path))
 
     assert provider.prefetch("delegate timeout") == ""
+
+
+def test_status_reports_retrieval_gate_config(tmp_path: Path) -> None:
+    provider = ContinuityProvider()
+    provider.initialize(
+        session_id="session-gates",
+        hermes_home=str(tmp_path),
+        continuity_config={
+            "retrieval_gates": {
+                "min_base_relevance": 0.2,
+                "low_information": False,
+            }
+        },
+    )
+
+    result = json.loads(provider.handle_tool_call("continuity_status", {}))
+
+    assert result["retrieval_gates"]["min_base_relevance"] == 0.2
+    assert result["retrieval_gates"]["min_vector_relevance"] == 0.05
+    assert result["retrieval_gates"]["low_information"] is False
+    assert result["retrieval_gates"]["facet_compatibility"] is True

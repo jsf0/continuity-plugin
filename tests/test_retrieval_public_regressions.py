@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from continuity.config import RetrievalGateConfig
 from continuity.models import ContextRecord
 from continuity.reranking import RerankHit
 from continuity.retrieval import ContinuityRetriever
@@ -227,3 +228,122 @@ def test_memory_meta_query_retrieves_memory_system_record(tmp_path: Path) -> Non
     )
 
     assert [hit.record.id for hit in hits][:1] == ["memory_context"]
+
+
+def _single_record_store(tmp_path: Path, *records: ContextRecord) -> ContinuityStore:
+    store = ContinuityStore(tmp_path / "single-gate.db")
+    store.migrate()
+    for record in records:
+        store.upsert_record(record)
+    return store
+
+
+def test_facet_gate_can_be_disabled_for_diagnostics(tmp_path: Path) -> None:
+    store = _single_record_store(
+        tmp_path,
+        _record(
+            "hardware_framework_context",
+            "Framework Desktop hardware setup",
+            "User owns Framework Desktop hardware with replaceable modules.",
+            tags=["framework", "desktop", "hardware"],
+            entities=["Framework Desktop"],
+            kind="lesson_learned",
+        ),
+        _record(
+            "api_framework_context",
+            "API framework decision",
+            "The project needs an API framework for routes and middleware.",
+            tags=["framework", "api", "software"],
+            entities=["API framework"],
+            kind="project_convention",
+        ),
+    )
+
+    default_ids = [
+        hit.record.id
+        for hit in ContinuityRetriever(store, association_enabled=False).search(
+            "what API framework should we use?", limit=5
+        )
+    ]
+    diagnostic_ids = [
+        hit.record.id
+        for hit in ContinuityRetriever(
+            store,
+            association_enabled=False,
+            gate_config=RetrievalGateConfig(facet_compatibility=False),
+        ).search("what API framework should we use?", limit=5)
+    ]
+
+    assert "hardware_framework_context" not in default_ids
+    assert "hardware_framework_context" in diagnostic_ids
+
+
+def test_low_information_gate_can_be_disabled_for_diagnostics(tmp_path: Path) -> None:
+    store = _single_record_store(
+        tmp_path,
+        _record(
+            "vague_status_context",
+            "test now status phrase",
+            "The phrase test now appears in a stale status update.",
+            tags=["test", "now"],
+            kind="lesson_learned",
+        ),
+    )
+    default_hits = ContinuityRetriever(store, association_enabled=False).search("test now", limit=5)
+    diagnostic_hits = ContinuityRetriever(
+        store,
+        association_enabled=False,
+        gate_config=RetrievalGateConfig(low_information=False),
+    ).search("test now", limit=5)
+
+    assert default_hits == []
+    assert [hit.record.id for hit in diagnostic_hits] == ["vague_status_context"]
+
+
+def test_memory_meta_gate_can_be_disabled_for_diagnostics(tmp_path: Path) -> None:
+    store = _single_record_store(
+        tmp_path,
+        _record(
+            "test_memory_provider_context",
+            "test memory provider implementation note",
+            "A stale test phrase appears in a memory provider note.",
+            tags=["test", "memory-provider"],
+            entities=["memory provider"],
+            kind="lesson_learned",
+        ),
+    )
+    default_ids = [
+        hit.record.id
+        for hit in ContinuityRetriever(
+            store,
+            association_enabled=False,
+            gate_config=RetrievalGateConfig(low_information=False),
+        ).search("test", limit=5)
+    ]
+    diagnostic_ids = [
+        hit.record.id
+        for hit in ContinuityRetriever(
+            store,
+            association_enabled=False,
+            gate_config=RetrievalGateConfig(low_information=False, memory_meta=False),
+        ).search("test", limit=5)
+    ]
+
+    assert "test_memory_provider_context" not in default_ids
+    assert "test_memory_provider_context" in diagnostic_ids
+
+
+def test_strong_personal_anchor_bypass_can_be_disabled(tmp_path: Path) -> None:
+    debug = ContinuityRetriever(
+        _store(tmp_path),
+        reranker_backend=RejectingReranker(),
+        reranker_min_score=0.15,
+        association_enabled=False,
+        gate_config=RetrievalGateConfig(strong_personal_anchor_reranker_bypass=False),
+    ).debug_search("how much camper can I pull with my setup?", limit=5)
+
+    selected_ids = {candidate.record.id for candidate in debug["selected"]}
+    rejected_by_id = {candidate.record.id: candidate for candidate in debug["rejected"]}
+
+    assert "camper_context" not in selected_ids
+    assert rejected_by_id["camper_context"].rejected_reason == "below_min_reranker_score"
