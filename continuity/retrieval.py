@@ -7,6 +7,14 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
 from .config import RetrievalGateConfig
+from .context_labels import (
+    ContextLabelSet,
+    compare_contexts,
+    context_from_mapping,
+    context_from_record,
+    context_to_mapping,
+    has_comparison_intent,
+)
 from .dynamic_expansion import propose_expansion_terms
 from .embeddings import VectorBackend
 from .models import ContextRecord, SkillLink
@@ -338,12 +346,16 @@ class ContinuityRetriever:
         scope_project: object = None,
         limit: int = 5,
         include_stale: bool = False,
+        query_context: ContextLabelSet | dict[str, object] | None = None,
+        comparison_intent: bool = False,
     ) -> list[RetrievalHit]:
         debug = self.debug_search(
             query,
             scope_project=scope_project,
             limit=limit,
             include_stale=include_stale,
+            query_context=query_context,
+            comparison_intent=comparison_intent,
         )
         hits = [
             RetrievalHit(
@@ -366,10 +378,18 @@ class ContinuityRetriever:
         scope_project: object = None,
         limit: int = 5,
         include_stale: bool = False,
+        query_context: ContextLabelSet | dict[str, object] | None = None,
+        comparison_intent: bool = False,
     ) -> dict[str, object]:
         tokens = _query_tokens(query)
         expanded_tokens = _expand_tokens(tokens)
         raw_tokens = _raw_query_tokens(query)
+        effective_query_context = (
+            query_context
+            if isinstance(query_context, ContextLabelSet)
+            else context_from_mapping(query_context or {})
+        )
+        effective_comparison_intent = comparison_intent or has_comparison_intent(query)
         personal_query = bool(raw_tokens & PERSONAL_QUERY_RAW_TERMS)
         preference_query = _is_preference_query(expanded_tokens, personal_query=personal_query)
         memory_meta_query = _is_memory_meta_query(expanded_tokens)
@@ -536,6 +556,13 @@ class ContinuityRetriever:
                 candidate.rejected_reason = "low_information_direct_query"
                 rejected.append(candidate)
                 continue
+            if not _apply_context_compatibility(
+                candidate,
+                effective_query_context,
+                comparison_intent=effective_comparison_intent,
+            ):
+                rejected.append(candidate)
+                continue
             if candidate.total <= 0:
                 candidate.rejected_reason = "non_positive_total_score"
                 rejected.append(candidate)
@@ -551,6 +578,8 @@ class ContinuityRetriever:
             expanded_tokens=expanded_tokens,
             query_tokens=tokens,
             query_facets=query_facets,
+            query_context=effective_query_context,
+            comparison_intent=effective_comparison_intent,
             personal_query=personal_query,
             include_stale=include_stale,
         )
@@ -559,6 +588,8 @@ class ContinuityRetriever:
         rejected.sort(key=lambda candidate: (-candidate.total, candidate.record.id))
         return {
             "query": query,
+            "query_context": context_to_mapping(effective_query_context),
+            "comparison_intent": effective_comparison_intent,
             "tokens": sorted(tokens),
             "expanded_tokens": sorted(expanded_tokens),
             "dynamic_expansion": [term.to_dict() for term in dynamic_expansion],
@@ -612,6 +643,8 @@ class ContinuityRetriever:
         expanded_tokens: set[str],
         query_tokens: set[str],
         query_facets: set[str],
+        query_context: ContextLabelSet,
+        comparison_intent: bool,
         personal_query: bool,
         include_stale: bool,
     ) -> dict[str, object]:
@@ -738,6 +771,8 @@ class ContinuityRetriever:
                     edge_type=edge.edge_type,
                     expanded_tokens=expanded_tokens,
                     query_facets=query_facets,
+                    query_context=query_context,
+                    comparison_intent=comparison_intent,
                     personal_query=personal_query,
                     gate_config=self.gate_config,
                 )
@@ -787,6 +822,56 @@ class ContinuityRetriever:
         return trace
 
 
+def _apply_context_compatibility(
+    candidate: CandidateScore,
+    query_context: ContextLabelSet,
+    *,
+    comparison_intent: bool,
+) -> bool:
+    compatibility = compare_contexts(
+        query_context,
+        context_from_record(candidate.record),
+        comparison_intent=comparison_intent,
+    )
+    candidate.metadata_boost += compatibility.score_adjustment
+    for reason in compatibility.reasons:
+        if reason not in candidate.reasons:
+            candidate.reasons.append(reason)
+    if compatibility.hard_conflict and not compatibility.comparison_allowed:
+        conflict_key = next(iter(sorted(compatibility.conflicts)), "context")
+        candidate.rejected_reason = f"context_label_conflict:{conflict_key}"
+        return False
+    if compatibility.missing_required_partition and not compatibility.comparison_allowed:
+        missing_key = next(iter(sorted(compatibility.missing_query_keys)), "context")
+        candidate.rejected_reason = f"missing_partition_context:{missing_key}"
+        return False
+    return True
+
+
+def _association_context_allowed(
+    *,
+    root_seed: ContextRecord | None,
+    neighbor: ContextRecord,
+    query_context: ContextLabelSet,
+    comparison_intent: bool,
+) -> tuple[bool, str]:
+    effective_query_context = query_context
+    root_context = context_from_record(root_seed) if root_seed is not None else ContextLabelSet()
+    if not effective_query_context.labels and root_context.labels:
+        effective_query_context = root_context
+    compatibility = compare_contexts(
+        effective_query_context,
+        context_from_record(neighbor),
+        comparison_intent=comparison_intent,
+        allow_missing_partition=bool(root_context.labels),
+    )
+    if compatibility.hard_conflict and not compatibility.comparison_allowed:
+        return False, "context_label_conflict"
+    if compatibility.missing_required_partition and not compatibility.comparison_allowed:
+        return False, "missing_partition_context"
+    return True, "allowed"
+
+
 def _association_neighbor_allowed(
     *,
     root_seed: ContextRecord | None,
@@ -795,10 +880,20 @@ def _association_neighbor_allowed(
     edge_type: str,
     expanded_tokens: set[str],
     query_facets: set[str],
+    query_context: ContextLabelSet,
+    comparison_intent: bool,
     personal_query: bool,
     gate_config: RetrievalGateConfig,
 ) -> tuple[bool, str]:
     """Gate graph-expanded neighbors so broad edges do not pollute context."""
+    context_allowed, context_cut_reason = _association_context_allowed(
+        root_seed=root_seed,
+        neighbor=neighbor,
+        query_context=query_context,
+        comparison_intent=comparison_intent,
+    )
+    if not context_allowed:
+        return False, context_cut_reason
     if gate_config.facet_compatibility and _facets_incompatible(
         query_facets, _facets_for_record(neighbor)
     ):
