@@ -170,6 +170,31 @@ def test_build_extraction_prompt_for_manpage_requests_operational_records() -> N
     assert "manual page named" in prompt
 
 
+def test_build_extraction_prompt_for_hermes_docs_skips_examples_and_targets_agent_facts() -> None:
+    segment = SourceSegment(
+        segment_id="file://website/docs/user-guide/features/memory.md#examples",
+        source_id="file://website/docs/user-guide/features/memory.md",
+        kind="section",
+        title="Examples",
+        text="Example memory:\n- User works in ~/code/api\n- Project uses staging SSH key",
+        location=SourceLocation(
+            uri="file://website/docs/user-guide/features/memory.md",
+            path="website/docs/user-guide/features/memory.md",
+            line_start=10,
+            line_end=14,
+        ),
+        metadata={"content_hash": "abc", "contains_example": True},
+    )
+
+    prompt = build_extraction_prompt(segment, _document(), recipe="hermes-docs")
+
+    assert "Hermes Agent documentation" in prompt
+    assert "Do not turn fictional or illustrative example" in prompt
+    assert "delegate_task" in prompt
+    assert "memory provider" in prompt
+    assert "example-like segment: true" in prompt
+
+
 def test_build_json_repair_prompt_requests_json_only() -> None:
     prompt = build_json_repair_prompt("not-json", error="bad parse")
 

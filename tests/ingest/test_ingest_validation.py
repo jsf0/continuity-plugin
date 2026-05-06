@@ -105,3 +105,23 @@ def test_safety_gate_accepts_safe_source_linked_candidate() -> None:
     rejection = SafetyGate().assess(candidate)
 
     assert rejection is None
+
+
+def test_safety_gate_rejects_example_derived_candidate_from_segment_metadata() -> None:
+    candidate = _candidate(
+        title="User development environment",
+        summary="The user works in ~/code/api.",
+        source_refs=[
+            SourceRef(
+                type="file",
+                uri="file://memory.md",
+                section="Examples",
+                metadata={"contains_example": True},
+            )
+        ],
+    )
+
+    rejection = SafetyGate().assess(candidate)
+
+    assert rejection is not None
+    assert "example_derived_candidate" in rejection.reasons

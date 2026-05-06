@@ -112,6 +112,36 @@ def test_man_page_section_segmenter_groups_operational_sections(tmp_path) -> Non
     assert "rcctl enable daemon" in synopsis.text
 
 
+def test_heading_section_segmenter_marks_example_code_and_table_sections(tmp_path) -> None:
+    path = tmp_path / "memory.md"
+    path.write_text(
+        "# Memory\n"
+        "## Example memory entries\n"
+        "| Name | Value |\n"
+        "| --- | --- |\n"
+        "| Project | demo |\n"
+        "```yaml\n"
+        "user: fake\n"
+        "```\n",
+        encoding="utf-8",
+    )
+    document = SourceDocument(
+        source_id="file://memory.md",
+        source_type="markdown",
+        uri="file://memory.md",
+        title="memory.md",
+        metadata={"path": str(path), "relative_path": "memory.md"},
+    )
+    parsed = MarkdownParser().parse(document)
+
+    segments = HeadingSectionSegmenter().segment(parsed, document)
+
+    example_segment = segments[1]
+    assert example_segment.metadata["contains_example"] is True
+    assert example_segment.metadata["contains_code_block"] is True
+    assert example_segment.metadata["contains_table"] is True
+
+
 def test_fixed_window_segmenter_splits_blocks_into_line_bounded_windows(tmp_path) -> None:
     path = tmp_path / "window.txt"
     path.write_text("one\ntwo\nthree\nfour\nfive\n", encoding="utf-8")

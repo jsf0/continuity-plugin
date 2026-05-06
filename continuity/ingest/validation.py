@@ -88,6 +88,8 @@ class SafetyGate:
             reasons.append("secret_detected")
         if candidate.trust_level.startswith("corpus") and not candidate.source_refs:
             reasons.append("missing_source_refs")
+        if _is_example_derived(candidate):
+            reasons.append("example_derived_candidate")
         if not reasons:
             return None
         return Rejection(
@@ -101,6 +103,12 @@ class SafetyGate:
 def _candidate_text(candidate: CandidateRecord) -> str:
     return "\n".join(
         part for part in [candidate.title, candidate.summary, candidate.details or ""] if part
+    )
+
+
+def _is_example_derived(candidate: CandidateRecord) -> bool:
+    return any(
+        bool(source_ref.metadata.get("contains_example")) for source_ref in candidate.source_refs
     )
 
 

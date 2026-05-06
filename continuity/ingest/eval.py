@@ -19,6 +19,8 @@ class EvalCase:
     query: str
     expected_record_titles: list[str]
     expected_tags: list[str]
+    expected_top_k: int | None = None
+    forbidden_record_titles: list[str] = field(default_factory=list)
     forbidden_tags: list[str] = field(default_factory=list)
     scope_project: str | None = None
     source_candidate_ids: list[str] = field(default_factory=list)
@@ -29,6 +31,8 @@ class EvalCase:
             "query": self.query,
             "expected_record_titles": self.expected_record_titles,
             "expected_tags": self.expected_tags,
+            "expected_top_k": self.expected_top_k,
+            "forbidden_record_titles": self.forbidden_record_titles,
             "forbidden_tags": self.forbidden_tags,
             "scope_project": self.scope_project,
             "source_candidate_ids": self.source_candidate_ids,
@@ -41,6 +45,8 @@ class EvalCase:
             query=str(value.get("query") or ""),
             expected_record_titles=_string_list(value.get("expected_record_titles")),
             expected_tags=_string_list(value.get("expected_tags")),
+            expected_top_k=_optional_int(value.get("expected_top_k")),
+            forbidden_record_titles=_string_list(value.get("forbidden_record_titles")),
             forbidden_tags=_string_list(value.get("forbidden_tags")),
             scope_project=_optional_str(value.get("scope_project")),
             source_candidate_ids=_string_list(value.get("source_candidate_ids")),
@@ -56,7 +62,9 @@ class EvalCaseResult:
     passed: bool
     matched_titles: list[str]
     missing_titles: list[str]
+    top_k_failures: list[str]
     missing_tags: list[str]
+    forbidden_title_matches: list[str]
     forbidden_matches: list[str]
     selected_titles: list[str]
     selected_tags: list[str]
@@ -68,7 +76,9 @@ class EvalCaseResult:
             "passed": self.passed,
             "matched_titles": self.matched_titles,
             "missing_titles": self.missing_titles,
+            "top_k_failures": self.top_k_failures,
             "missing_tags": self.missing_tags,
+            "forbidden_title_matches": self.forbidden_title_matches,
             "forbidden_matches": self.forbidden_matches,
             "selected_titles": self.selected_titles,
             "selected_tags": self.selected_tags,
@@ -126,16 +136,37 @@ class EvalRunner:
         missing_titles = [
             title for title in eval_case.expected_record_titles if title not in selected_titles
         ]
+        top_k_titles = (
+            selected_titles[: eval_case.expected_top_k]
+            if eval_case.expected_top_k
+            else selected_titles
+        )
+        top_k_failures = [
+            title
+            for title in eval_case.expected_record_titles
+            if eval_case.expected_top_k and title in selected_titles and title not in top_k_titles
+        ]
         missing_tags = [tag for tag in eval_case.expected_tags if tag not in selected_tags]
+        forbidden_title_matches = [
+            title for title in eval_case.forbidden_record_titles if title in selected_titles
+        ]
         forbidden_matches = [tag for tag in eval_case.forbidden_tags if tag in selected_tags]
-        passed = not missing_titles and not missing_tags and not forbidden_matches
+        passed = (
+            not missing_titles
+            and not top_k_failures
+            and not missing_tags
+            and not forbidden_title_matches
+            and not forbidden_matches
+        )
         return EvalCaseResult(
             eval_id=eval_case.eval_id,
             query=eval_case.query,
             passed=passed,
             matched_titles=matched_titles,
             missing_titles=missing_titles,
+            top_k_failures=top_k_failures,
             missing_tags=missing_tags,
+            forbidden_title_matches=forbidden_title_matches,
             forbidden_matches=forbidden_matches,
             selected_titles=selected_titles,
             selected_tags=selected_tags,
@@ -183,3 +214,10 @@ def _optional_str(value: object) -> str | None:
         return None
     text = str(value)
     return text if text else None
+
+
+def _optional_int(value: object) -> int | None:
+    if value is None or value == "":
+        return None
+    number = int(value)
+    return number if number > 0 else None

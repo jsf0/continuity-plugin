@@ -45,6 +45,7 @@ class HeadingSectionSegmenter:
             segment_text = _blocks_to_text(section_blocks)
             location = _combined_location(section_blocks, document)
             heading_path = [item.text for item in heading_stack]
+            metadata = _segment_metadata(section_blocks, heading_path, segment_text)
             segments.append(
                 SourceSegment(
                     segment_id=f"{document.source_id}#{_slugify(heading.text)}",
@@ -53,10 +54,7 @@ class HeadingSectionSegmenter:
                     title=heading.text,
                     text=segment_text,
                     location=location,
-                    metadata={
-                        "heading_path": heading_path,
-                        "content_hash": stable_hash(segment_text),
-                    },
+                    metadata=metadata,
                     scope_project=document.scope_project,
                     scope_repo=document.scope_repo,
                     scope_user=document.scope_user,
@@ -178,6 +176,36 @@ def _whole_document_segment(parsed: ParsedDocument, document: SourceDocument) ->
 
 def _blocks_to_text(blocks: list[ParsedBlock]) -> str:
     return "\n".join(block.text for block in blocks if block.kind != "blank" and block.text).strip()
+
+
+def _segment_metadata(
+    blocks: list[ParsedBlock], heading_path: list[str], segment_text: str
+) -> dict[str, object]:
+    metadata: dict[str, object] = {
+        "heading_path": heading_path,
+        "content_hash": stable_hash(segment_text),
+    }
+    lower_headings = " ".join(heading_path).casefold()
+    lower_text = segment_text.casefold()
+    if any(word in lower_headings for word in ("example", "sample", "demo")) or any(
+        phrase in lower_text
+        for phrase in ("example memory", "example config", "sample config", "for example")
+    ):
+        metadata["contains_example"] = True
+    if any(block.kind == "code_block" for block in blocks):
+        metadata["contains_code_block"] = True
+    if _contains_markdown_table(blocks):
+        metadata["contains_table"] = True
+    return metadata
+
+
+def _contains_markdown_table(blocks: list[ParsedBlock]) -> bool:
+    table_like_lines = 0
+    for block in blocks:
+        text = block.text.strip()
+        if text.startswith("|") and text.endswith("|") and text.count("|") >= 2:
+            table_like_lines += 1
+    return table_like_lines >= 2
 
 
 def _combined_location(
