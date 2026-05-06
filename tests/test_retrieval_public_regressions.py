@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from continuity.models import ContextRecord
 from continuity.reranking import RerankHit
 from continuity.retrieval import ContinuityRetriever
@@ -65,6 +67,13 @@ def _store(tmp_path: Path) -> ContinuityStore:
             entities=[],
         ),
         _record(
+            "work_style_preference",
+            "Preferred code-change working style",
+            "User prefers methodical, thorough code changes with reasoning before edits, tests passing, and docs updated.",
+            tags=["preference", "work_style", "code changes", "testing", "docs"],
+            entities=["code-change workflow"],
+        ),
+        _record(
             "workstation_context",
             "Atlas Workstation local inference setup",
             "User owns an Atlas Workstation used for local model experiments and GPU testing.",
@@ -91,6 +100,73 @@ def _store(tmp_path: Path) -> ContinuityStore:
     for record in records:
         store.upsert_record(record)
     return store
+
+
+RETRIEVAL_REGRESSION_CASES = [
+    pytest.param(
+        "how much camper can I pull?",
+        {"camper_context", "van_context"},
+        {"generic_towing_retrieval_note", "memory_context", "software_framework_context"},
+        False,
+        id="anchored-personal-towing-positive-with-noise-forbidden",
+    ),
+    pytest.param(
+        "how do I prefer you handle code changes?",
+        {"work_style_preference"},
+        {"generic_towing_retrieval_note", "memory_context", "software_framework_context"},
+        False,
+        id="personal-work-style-preference",
+    ),
+    pytest.param(
+        "what framework should this API use?",
+        {"software_framework_context"},
+        {"workstation_context", "memory_context", "generic_towing_retrieval_note"},
+        False,
+        id="software-framework-not-hardware-or-memory-meta",
+    ),
+    pytest.param(
+        "what GPU does my workstation have?",
+        {"workstation_context"},
+        {"software_framework_context", "memory_context", "van_context"},
+        False,
+        id="personal-hardware-not-software-framework",
+    ),
+    pytest.param(
+        "why did the association graph retrieve that memory record?",
+        {"memory_context"},
+        {"van_context", "camper_context", "workstation_context"},
+        False,
+        id="memory-meta-query-positive",
+    ),
+    pytest.param(
+        "how about now?",
+        set(),
+        {"van_context", "camper_context", "memory_context", "work_style_preference"},
+        True,
+        id="low-information-no-context",
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    ("query", "expected_ids", "forbidden_ids", "expect_no_context"),
+    RETRIEVAL_REGRESSION_CASES,
+)
+def test_retrieval_regression_suite_tracks_recall_and_precision(
+    tmp_path: Path,
+    query: str,
+    expected_ids: set[str],
+    forbidden_ids: set[str],
+    expect_no_context: bool,
+) -> None:
+    hits = ContinuityRetriever(_store(tmp_path), association_enabled=True).search(query, limit=5)
+    hit_ids = {hit.record.id for hit in hits}
+
+    if expect_no_context:
+        assert hit_ids == set()
+    else:
+        assert expected_ids <= hit_ids
+    assert hit_ids.isdisjoint(forbidden_ids)
 
 
 def test_dynamic_expansion_recovers_related_towing_context_without_domain_aliases(
