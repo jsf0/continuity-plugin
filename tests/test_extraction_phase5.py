@@ -47,3 +47,38 @@ def test_unsafe_session_content_is_rejected() -> None:
     )
 
     assert records == []
+
+
+def test_does_not_extract_memory_marker_examples_from_system_or_inline_text() -> None:
+    records = extract_records_from_messages(
+        session_id="s1",
+        messages=[
+            {
+                "role": "system",
+                "content": "Prefer explicit markers (`Remember:`, `Lesson learned:`, `Decision:`) before broad extraction.",
+            },
+            {
+                "role": "assistant",
+                "content": "Docs mention `Remember: I prefer examples` as syntax, not a memory write.",
+            },
+        ],
+    )
+
+    assert records == []
+
+
+def test_extracts_markers_only_at_line_start() -> None:
+    records = extract_records_from_messages(
+        session_id="s1",
+        messages=[
+            {
+                "role": "assistant",
+                "content": "Context first.\nLesson learned: retry transient vector backend initialization once.",
+            }
+        ],
+        scope_project="continuity",
+    )
+
+    assert len(records) == 1
+    assert records[0].kind == "lesson_learned"
+    assert records[0].summary == "retry transient vector backend initialization once."

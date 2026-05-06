@@ -10,10 +10,20 @@ from .models import ContextRecord, SourceRef
 from .security import is_safe_memory_text
 
 _PREFIX_PATTERNS = [
-    (re.compile(r"\bremember\s*:\s*(.+)", re.IGNORECASE), "user_preference"),
-    (re.compile(r"\blesson learned\s*:\s*(.+)", re.IGNORECASE), "lesson_learned"),
-    (re.compile(r"\bdecision\s*:\s*(.+)", re.IGNORECASE), "decision"),
+    (
+        re.compile(r"^\s*(?:[-*]\s*)?remember\s*:\s*(.+)$", re.IGNORECASE | re.MULTILINE),
+        "user_preference",
+    ),
+    (
+        re.compile(r"^\s*(?:[-*]\s*)?lesson learned\s*:\s*(.+)$", re.IGNORECASE | re.MULTILINE),
+        "lesson_learned",
+    ),
+    (
+        re.compile(r"^\s*(?:[-*]\s*)?decision\s*:\s*(.+)$", re.IGNORECASE | re.MULTILINE),
+        "decision",
+    ),
 ]
+_EXTRACTABLE_ROLES = {"user", "assistant"}
 
 
 def extract_records_from_messages(
@@ -30,6 +40,9 @@ def extract_records_from_messages(
     records: list[ContextRecord] = []
     seen_ids: set[str] = set()
     for index, message in enumerate(messages, start=1):
+        role = str(message.get("role") or "").strip().lower()
+        if role not in _EXTRACTABLE_ROLES:
+            continue
         content = str(message.get("content") or "").strip()
         if len(content) < 12 or not is_safe_memory_text(content):
             continue
