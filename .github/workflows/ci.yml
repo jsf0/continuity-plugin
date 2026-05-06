@@ -4,6 +4,11 @@ on:
   push:
     branches: [main]
   pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   test:
@@ -12,21 +17,23 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ['3.11', '3.12']
+        python-version: ["3.11", "3.12"]
 
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v5
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
 
-      - name: Install project
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install development dependencies
         run: uv sync --dev
 
       - name: Check formatting
@@ -35,11 +42,34 @@ jobs:
       - name: Lint
         run: uv run ruff check .
 
-      - name: Test
+      - name: Run tests
         run: uv run pytest tests/ -q
 
-      - name: Smoke test
+      - name: Compile Python sources
+        run: uv run python -m compileall continuity tests scripts
+
+      - name: Run synthetic retrieval demo
+        run: ./scripts/demo-retrieval.sh --quiet
+
+      - name: Run isolated plugin smoke test
         run: ./scripts/smoke-test.sh
 
       - name: Build package
         run: uv build
+
+      - name: Verify wheel contents
+        run: |
+          uv run python - <<'PY'
+          import glob
+          import zipfile
+
+          wheels = sorted(glob.glob("dist/*.whl"))
+          assert wheels, "no wheel produced"
+          wheel = wheels[-1]
+          print(wheel)
+          with zipfile.ZipFile(wheel) as z:
+              names = set(z.namelist())
+          for required in ["continuity/plugin.yaml", "continuity/py.typed"]:
+              assert required in names, f"missing {required}"
+              print(required, "OK")
+          PY

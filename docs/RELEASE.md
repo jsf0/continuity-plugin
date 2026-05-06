@@ -17,12 +17,19 @@ uv sync --dev
 uv run ruff format --check .
 uv run ruff check .
 uv run pytest tests/ -q
-python -m compileall continuity tests
-uv build
+python -m compileall continuity tests scripts
+./scripts/demo-retrieval.sh --quiet
 ./scripts/smoke-test.sh
+uv build
 ```
 
-## 3. Inspect package contents
+## 3. Verify GitHub Actions CI
+
+The repository includes `.github/workflows/ci.yml`, which runs the same release gate on Python 3.11 and 3.12 for pushes, pull requests, and manual dispatches.
+
+Before making a public release, confirm the workflow has one green run on the default branch. After the first green run, configure branch protection to require CI before merging or tagging public release work.
+
+## 4. Inspect package contents
 
 ```bash
 python -m zipfile -l dist/*.whl | sort
@@ -38,7 +45,7 @@ continuity/retrieval.py
 continuity/store.py
 ```
 
-## 4. Run isolated install smoke
+## 5. Run isolated install smoke
 
 The repository smoke test creates a temporary `HERMES_HOME`, installs the plugin, initializes it, exercises add/search/prefetch/delete, verifies memory mirroring and skill links, and checks wheel metadata when `uv` is available:
 
@@ -52,7 +59,7 @@ Expected output ends with:
 smoke test ok
 ```
 
-## 5. Review docs
+## 6. Review docs
 
 Confirm these are current:
 
@@ -65,7 +72,7 @@ Confirm these are current:
 - `CONTRIBUTING.md`
 - `SECURITY.md`
 
-## 6. Bump version if needed
+## 7. Bump version if needed
 
 Update version in:
 
@@ -81,7 +88,7 @@ Initial alpha target:
 0.1.0
 ```
 
-## 7. Clean build artifacts
+## 8. Clean build artifacts
 
 ```bash
 rm -rf dist build *.egg-info
@@ -90,7 +97,7 @@ uv build
 
 Do not commit build artifacts.
 
-## 8. Prepare GitHub repository
+## 9. Prepare GitHub repository
 
 Before making the repo public, confirm:
 
@@ -102,7 +109,7 @@ Before making the repo public, confirm:
 - branch protection requires CI after the first green run;
 - no local runtime DBs, caches, secrets, `.venv`, or `dist/` artifacts are tracked.
 
-## 9. Tag release
+## 10. Tag release
 
 Only push after deciding the GitHub remote and repository are correct.
 
@@ -111,7 +118,7 @@ git tag v0.1.0
 git push origin main --tags
 ```
 
-## 10. GitHub release notes
+## 11. GitHub release notes
 
 Suggested draft:
 
