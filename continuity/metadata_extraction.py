@@ -46,10 +46,12 @@ def extract_metadata(
     if entities:
         notes.append("capitalized_phrase_entities")
 
+    identifier_entities_added = False
     for token in re.findall(r"\b[a-z][a-z0-9]+(?:[-_.][a-z0-9]+)+\b", text):
         # Code/project identifiers are useful literal entities, but not broad tags.
         entities.add(token)
-    if any(note != "literal_identifier_entities" for note in notes):
+        identifier_entities_added = True
+    if identifier_entities_added:
         notes.append("literal_identifier_entities")
 
     lower_text = text.lower()
