@@ -55,6 +55,15 @@ memory:
       max_records: 5
       kinds: [user_preference, project_convention]
       min_importance: 0.75
+
+    dream:
+      enabled: false
+      schedule: "03:30"
+      timezone: "UTC"
+      mode: "report"
+      max_archives_per_run: 20
+      run_on_initialize: false
+      run_on_turn: false
 ```
 
 ## Top-level options
@@ -310,6 +319,63 @@ Default: `[user_preference, project_convention]`.
 Minimum record importance required for pinning.
 
 Default: `0.75`.
+
+## Dream maintenance options
+
+The dream cycle is offline/report-oriented memory maintenance. It checks stale candidates, recomputed quality-warning inventory, vector index parity, and association-graph edge inventory. Report mode does not mutate records; archive modes only soft-archive and never hard-delete.
+
+### `dream.enabled`
+
+Whether scheduled dream checks are enabled. Scheduling is evaluated during provider initialization and/or turn sync when the matching `run_on_*` option is enabled; Hermes does not run plugin code on an independent wall-clock timer by itself.
+
+Default: `false`.
+
+### `dream.schedule`
+
+Local `HH:MM` time after which a scheduled dream can run once per day.
+
+Default: `03:30`.
+
+### `dream.timezone`
+
+IANA timezone for `dream.schedule`.
+
+Default: `UTC`.
+
+### `dream.mode`
+
+Accepted values:
+
+```text
+report
+archive-safe
+archive-all-candidates
+```
+
+Start with `report`. Archive modes soft-archive deterministic stale candidates and still never hard-delete.
+
+Default: `report`.
+
+### `dream.run_on_initialize` / `dream.run_on_turn`
+
+Whether the provider should check the schedule during initialization or turn sync.
+
+Default: `false` for both.
+
+Report-only example:
+
+```yaml
+memory:
+  provider: continuity
+  continuity:
+    dream:
+      enabled: true
+      schedule: "03:30"
+      timezone: "UTC"
+      mode: "report"
+      run_on_turn: true
+      run_on_initialize: true
+```
 
 ## Runtime DB
 

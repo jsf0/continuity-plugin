@@ -135,6 +135,41 @@ def test_dream_tool_report_mode_reports_candidates_without_mutating(tmp_path: Pa
     assert provider._store.get_state("dream:last_report") is not None
 
 
+def test_dream_report_includes_quality_vector_and_graph_inventory(tmp_path: Path) -> None:
+    provider = initialized_provider(tmp_path)
+    assert provider._store is not None
+    provider._store.upsert_record(
+        ContextRecord.from_dict(
+            {
+                "id": "generic_record",
+                "kind": "environment_fact",
+                "title": "Hermes global memory",
+                "summary": "Continuity memory provider loaded from plugin path.",
+                "tags": ["environment_fact"],
+                "entities": [],
+                "confidence": 0.9,
+                "importance": 0.8,
+                "trust_level": "built_in_memory_mirror",
+                "created_at": "2026-05-05T01:00:00Z",
+                "updated_at": "2026-05-05T01:00:00Z",
+            }
+        ),
+        create_associations=False,
+    )
+
+    result = call(provider, "continuity_dream", {"mode": "report"})
+
+    assert result["mutated"] is False
+    assert result["quality"]["warning_records"] == 1
+    assert result["quality"]["review_required"] == 0
+    assert result["quality"]["drift_records"] == 1
+    assert result["quality"]["top_warnings"] == [["generic_title", 1]]
+    assert result["vector_index"]["record_count"] == 1
+    assert result["vector_index"]["indexed_count"] == 0
+    assert result["vector_index"]["missing_count"] == 1
+    assert result["association_graph"]["edge_count"] == 0
+
+
 def test_dream_tool_archive_safe_archives_stale_candidates_and_records_last_run(
     tmp_path: Path,
 ) -> None:

@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from .config import DreamConfig
+from .quality_backfill import build_quality_backfill_report
 from .staleness import find_stale_candidates
 from .store import ContinuityStore
 
@@ -68,6 +69,7 @@ def run_dream_cycle(
             ):
                 archived_ids.append(candidate.record_id)
     after_counts = _status_counts(store)
+    quality_report = build_quality_backfill_report(store, limit=effective_limit)
     report: dict[str, object] = {
         "success": True,
         "mode": effective_mode,
@@ -76,6 +78,14 @@ def run_dream_cycle(
         "record_counts_before": before_counts,
         "record_counts_after": after_counts,
         "stale_candidates": [candidate.to_dict() for candidate in candidates],
+        "quality": {
+            "warning_records": quality_report.warning_count,
+            "review_required": quality_report.review_required_count,
+            "drift_records": quality_report.drift_count,
+            "top_warnings": quality_report.top_warnings,
+        },
+        "vector_index": _vector_index_summary(store),
+        "association_graph": _association_graph_summary(store),
         "archived_ids": archived_ids,
         "deleted_ids": [],
         "notes": _notes(effective_mode, candidates, archived_ids),
@@ -96,6 +106,34 @@ def _status_counts(store: ContinuityStore) -> dict[str, int]:
     for record in store.list_records():
         counts[record.status] = counts.get(record.status, 0) + 1
     return counts
+
+
+def _vector_index_summary(store: ContinuityStore) -> dict[str, int]:
+    record_count = len(store.list_records())
+    with store.connect() as conn:
+        row = conn.execute(
+            "SELECT COUNT(DISTINCT record_id) AS count FROM context_record_vectors"
+        ).fetchone()
+    indexed_count = int(row["count"] if row else 0)
+    return {
+        "record_count": record_count,
+        "indexed_count": indexed_count,
+        "missing_count": max(0, record_count - indexed_count),
+    }
+
+
+def _association_graph_summary(store: ContinuityStore) -> dict[str, int]:
+    with store.connect() as conn:
+        row = conn.execute(
+            """
+            SELECT COUNT(*) AS count
+            FROM context_record_association_edges e
+            JOIN context_records a ON a.id = e.memory_id_a
+            JOIN context_records b ON b.id = e.memory_id_b
+            WHERE a.status = 'active' AND b.status = 'active'
+            """
+        ).fetchone()
+    return {"edge_count": int(row["count"] if row else 0)}
 
 
 def _notes(mode: str, candidates: object, archived_ids: list[str]) -> list[str]:
