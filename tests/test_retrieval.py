@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from continuity.config import RetrievalGateConfig
 from continuity.models import ContextRecord
 from continuity.retrieval import ContinuityRetriever
 from continuity.store import ContinuityStore
@@ -71,3 +72,30 @@ def test_eval_fixture_queries_pass_phase2_retrieval(tmp_path: Path) -> None:
             assert record_id not in hit_ids, (
                 f"{record_id} unexpectedly returned for {query['query']!r}"
             )
+
+
+def test_retriever_uses_configurable_min_base_relevance_gate(tmp_path: Path) -> None:
+    store = ContinuityStore(tmp_path / "continuity.db")
+    store.migrate()
+    store.upsert_record(
+        ContextRecord.new(
+            id="r_soft_text_match",
+            kind="lesson_learned",
+            title="soft anchor",
+            summary="alpha appears only once in this otherwise generic note.",
+            confidence=0.5,
+            importance=0.5,
+        )
+    )
+
+    strict_hits = ContinuityRetriever(
+        store,
+        gate_config=RetrievalGateConfig(min_base_relevance=2.0),
+    ).search("alpha", limit=3)
+    lenient_hits = ContinuityRetriever(
+        store,
+        gate_config=RetrievalGateConfig(min_base_relevance=0.1),
+    ).search("alpha", limit=3)
+
+    assert [hit.record.id for hit in strict_hits] == []
+    assert [hit.record.id for hit in lenient_hits] == ["r_soft_text_match"]

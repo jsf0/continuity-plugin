@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
-from .config import DreamConfig
+from .config import DreamConfig, RetrievalGateConfig
 from .dream import run_dream_cycle
 from .embeddings import VectorBackend
 from .models import ContextRecord, SkillLink, SourceRef
@@ -293,6 +293,7 @@ def handle_search(
     association_hop_decay: float = 0.6,
     association_activation_threshold: float = 0.3,
     association_max_hops: int = 2,
+    gate_config: RetrievalGateConfig | None = None,
 ) -> dict[str, object]:
     query = str(args.get("query") or "").strip()
     if not query:
@@ -313,6 +314,7 @@ def handle_search(
         association_hop_decay=association_hop_decay,
         association_activation_threshold=association_activation_threshold,
         association_max_hops=association_max_hops,
+        gate_config=gate_config,
     ).search(
         query,
         scope_project=scope_project,
@@ -398,6 +400,7 @@ def handle_debug_retrieval(
     association_hop_decay: float = 0.6,
     association_activation_threshold: float = 0.3,
     association_max_hops: int = 2,
+    gate_config: RetrievalGateConfig | None = None,
 ) -> dict[str, object]:
     query = str(args.get("query") or "").strip()
     if not query:
@@ -419,6 +422,7 @@ def handle_debug_retrieval(
         association_hop_decay=association_hop_decay,
         association_activation_threshold=association_activation_threshold,
         association_max_hops=association_max_hops,
+        gate_config=gate_config,
     ).debug_search(
         query,
         scope_project=_optional_str(args.get("scope_project")),

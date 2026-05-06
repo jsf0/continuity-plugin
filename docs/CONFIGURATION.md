@@ -49,6 +49,19 @@ memory:
       activation_threshold: 0.3
       max_hops: 2
 
+    retrieval_gates:
+      min_base_relevance: 0.35
+      min_vector_relevance: 0.05
+      min_vector_only_relevance: 2.75
+      weak_vector_only: true
+      facet_compatibility: true
+      memory_meta: true
+      low_information: true
+      project_status_anchor: true
+      personal_project: true
+      activation_anchor: true
+      strong_personal_anchor_reranker_bypass: true
+
     pinned_system_prompt:
       enabled: true
       max_chars: 1200
@@ -298,6 +311,151 @@ Default: `0.3`.
 Maximum traversal depth.
 
 Default: `2`.
+
+## Retrieval gate tuning
+
+The `retrieval_gates` block controls conservative filters that run after candidate generation and before final context injection. Defaults are intentionally precision-first: it is better for continuity to return no memory than to inject a plausible but wrong memory.
+
+Use `continuity_debug_retrieval(query="...", limit=5)` before changing these values. Look at `rejected[].rejected_reason`, `selected[].reasons`, scores, and `activation_trace.cut_neighbors[].reason`; tune one setting at a time and then rerun regression/demo queries.
+
+### `retrieval_gates.min_base_relevance`
+
+Minimum lexical/metadata evidence required before a candidate can survive direct retrieval. This uses FTS, vector score, tag matches, entity matches, and text matches before scope, confidence, importance, reranker, or graph boosts.
+
+Default: `0.35`.
+
+Plain English:
+
+- If relevant records are rejected as `below_min_base_relevance`, try lowering this slightly, for example `0.35 -> 0.25`.
+- If vague queries pull barely related records because of one weak word match, raise it, for example `0.35 -> 0.5`.
+- Do not use this to fix reranker misses; tune `reranker.min_score` or `strong_personal_anchor_reranker_bypass` instead.
+
+### `retrieval_gates.min_vector_relevance`
+
+Minimum raw vector similarity before a vector hit is considered at all.
+
+Default: `0.05`.
+
+Plain English:
+
+- If paraphrases never even appear as candidates in debug output, lower this slightly.
+- If lots of semantically mushy vector hits appear in debug output, raise it.
+- This only matters when vectors are enabled.
+
+### `retrieval_gates.min_vector_only_relevance`
+
+Minimum weighted vector score required when a candidate has no FTS/tag/entity/text anchor.
+
+Default: `2.75`.
+
+Plain English:
+
+- If vector-only paraphrases are useful but show `weak_vector_only_without_anchor`, lower this a little.
+- If unrelated memories appear because neural similarity is too generous, raise this.
+- Prefer adding better tags/entities to important records before lowering this globally.
+
+### `retrieval_gates.weak_vector_only`
+
+Rejects vector-only candidates that fall below `min_vector_only_relevance`.
+
+Default: `true`.
+
+Plain English:
+
+- Disable only for experiments or very small, clean corpora.
+- If you disable this and see noisy memories, turn it back on and tune `min_vector_only_relevance` instead.
+
+### `retrieval_gates.facet_compatibility`
+
+Prevents obvious domain collisions such as software “framework” questions retrieving Framework laptop/desktop memories.
+
+Default: `true`.
+
+Plain English:
+
+- If debug output says `facet_incompatible_candidate` for a record that really is relevant, either improve the record tags/entities or temporarily disable this to confirm the gate is the cause.
+- If polysemous words cross domains, keep this enabled.
+
+### `retrieval_gates.memory_meta`
+
+Keeps continuity/memory-system records out of ordinary non-memory queries, and keeps generic memory words from matching unrelated records.
+
+Default: `true`.
+
+Plain English:
+
+- If normal questions retrieve continuity implementation/status records, keep this enabled.
+- If an actual memory-system query rejects relevant memory records as `memory_system_record_without_meta_query`, make the query more explicit (`continuity`, `retrieval`, `memory provider`) before disabling this.
+
+### `retrieval_gates.low_information`
+
+Suppresses retrieval for vague follow-ups with no durable anchor, such as “ok”, “how about now”, or “can you test and see if it is better now”.
+
+Default: `true`.
+
+Plain English:
+
+- If vague follow-ups inject stale project context, keep this enabled.
+- If short but meaningful local commands in your workflow are being rejected as `low_information_direct_query`, add a stronger project/entity word to the query or lower/disable this only after checking debug output.
+
+### `retrieval_gates.project_status_anchor`
+
+Requires active project-state records to match a non-generic query anchor before selection.
+
+Default: `true`.
+
+Plain English:
+
+- If old project status appears for generic “what now?” style queries, keep this enabled.
+- If a project-status record is relevant but rejected as `weak_project_status_candidate`, add specific tags/entities or lower this gate only for a trusted, scoped deployment.
+
+### `retrieval_gates.personal_project`
+
+Prevents first-person/personal queries from drifting into unrelated project status, and prevents broad graph edges from crossing between personal facts and project records without anchors.
+
+Default: `true`.
+
+Plain English:
+
+- If “what do I prefer?” retrieves random project roadmap records, keep this enabled.
+- If a personal query intentionally needs project context, make the query include the project/entity name before disabling this.
+
+### `retrieval_gates.activation_anchor`
+
+Requires rejected reranker candidates to have a strong non-generic query anchor before they can seed association-graph traversal.
+
+Default: `true`.
+
+Plain English:
+
+- If association graph rescue is too quiet and debug shows `weak_anchor_activation_seed` for a relevant candidate, improve tags/entities first; then consider disabling this for experiments.
+- If graph traversal fans out through old broad associations, keep this enabled.
+
+### `retrieval_gates.strong_personal_anchor_reranker_bypass`
+
+Lets strongly tagged/entity-matched personal records survive a low reranker score. This compensates for generic cross-encoders that often under-score short personal setup/preference facts.
+
+Default: `true`.
+
+Plain English:
+
+- If personal facts like vehicle/setup/preferences are rejected as `below_min_reranker_score` despite strong tag/entity matches, keep this enabled.
+- If personal records bypass the reranker too aggressively, disable this or improve tags/entities so only truly strong anchors match.
+
+### Tuning workflow
+
+1. Run `continuity_debug_retrieval` for a failing positive query and a nearby negative/noise query.
+2. Identify the rejection reason or noisy selected reason.
+3. Change one value by a small amount.
+4. Rerun the same positive and negative queries.
+5. Run `./scripts/demo-retrieval.sh --quiet` and the retrieval regression tests before keeping the change.
+
+Recommended command after tuning:
+
+```bash
+uv run pytest tests/test_retrieval.py tests/test_retrieval_public_regressions.py tests/test_association_graph.py -q
+./scripts/demo-retrieval.sh --quiet
+```
 
 ## Pinned system prompt options
 

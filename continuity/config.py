@@ -36,6 +36,23 @@ class AssociationGraphConfig:
 
 
 @dataclass(frozen=True)
+class RetrievalGateConfig:
+    """Configuration for conservative retrieval gates and thresholds."""
+
+    min_base_relevance: float = 0.35
+    min_vector_relevance: float = 0.05
+    min_vector_only_relevance: float = 2.75
+    weak_vector_only: bool = True
+    facet_compatibility: bool = True
+    memory_meta: bool = True
+    low_information: bool = True
+    project_status_anchor: bool = True
+    personal_project: bool = True
+    activation_anchor: bool = True
+    strong_personal_anchor_reranker_bypass: bool = True
+
+
+@dataclass(frozen=True)
 class DreamConfig:
     """Configuration for scheduled offline continuity maintenance."""
 
@@ -75,6 +92,7 @@ class ContinuityConfig:
     reranker_min_score: float = 0.15
     reranker_weight: float = 2.0
     reranker_top_k: int = 20
+    retrieval_gates: RetrievalGateConfig = field(default_factory=RetrievalGateConfig)
     pinned_system_prompt: PinnedSystemPromptConfig = field(default_factory=PinnedSystemPromptConfig)
     association_graph: AssociationGraphConfig = field(default_factory=AssociationGraphConfig)
     dream: DreamConfig = field(default_factory=DreamConfig)
@@ -92,6 +110,7 @@ class ContinuityConfig:
         association = (
             data.get("association_graph") if isinstance(data.get("association_graph"), dict) else {}
         )
+        gates = data.get("retrieval_gates") if isinstance(data.get("retrieval_gates"), dict) else {}
         dream = data.get("dream") if isinstance(data.get("dream"), dict) else {}
         strategy = str(data.get("session_strategy") or "per-repo")
         if strategy not in VALID_SESSION_STRATEGIES:
@@ -130,6 +149,27 @@ class ContinuityConfig:
             reranker_min_score=min(1.0, max(0.0, _float(reranker.get("min_score"), 0.15))),
             reranker_weight=max(0.0, _float(reranker.get("weight"), 2.0)),
             reranker_top_k=max(1, _int(reranker.get("top_k"), 20)),
+            retrieval_gates=RetrievalGateConfig(
+                min_base_relevance=min(
+                    10.0, max(0.0, _float(gates.get("min_base_relevance"), 0.35))
+                ),
+                min_vector_relevance=min(
+                    1.0, max(0.0, _float(gates.get("min_vector_relevance"), 0.05))
+                ),
+                min_vector_only_relevance=min(
+                    10.0, max(0.0, _float(gates.get("min_vector_only_relevance"), 2.75))
+                ),
+                weak_vector_only=_bool(gates.get("weak_vector_only"), True),
+                facet_compatibility=_bool(gates.get("facet_compatibility"), True),
+                memory_meta=_bool(gates.get("memory_meta"), True),
+                low_information=_bool(gates.get("low_information"), True),
+                project_status_anchor=_bool(gates.get("project_status_anchor"), True),
+                personal_project=_bool(gates.get("personal_project"), True),
+                activation_anchor=_bool(gates.get("activation_anchor"), True),
+                strong_personal_anchor_reranker_bypass=_bool(
+                    gates.get("strong_personal_anchor_reranker_bypass"), True
+                ),
+            ),
             pinned_system_prompt=PinnedSystemPromptConfig(
                 enabled=_bool(pinned.get("enabled"), True),
                 max_chars=max(200, _int(pinned.get("max_chars"), 1200)),

@@ -55,3 +55,35 @@ def test_config_parses_sentence_transformers_vector_backend() -> None:
     assert config.embedding_batch_size == 8
     assert config.embedding_normalize is False
     assert config.pinned_system_prompt.enabled is True
+
+
+def test_config_parses_retrieval_gate_tunables() -> None:
+    config = ContinuityConfig.from_mapping(
+        {
+            "retrieval_gates": {
+                "min_base_relevance": 0.2,
+                "min_vector_relevance": 0.04,
+                "min_vector_only_relevance": 3.2,
+                "weak_vector_only": False,
+                "facet_compatibility": False,
+                "memory_meta": False,
+                "low_information": False,
+                "project_status_anchor": False,
+                "personal_project": False,
+                "activation_anchor": False,
+                "strong_personal_anchor_reranker_bypass": False,
+            }
+        }
+    )
+
+    assert config.retrieval_gates.min_base_relevance == 0.2
+    assert config.retrieval_gates.min_vector_relevance == 0.04
+    assert config.retrieval_gates.min_vector_only_relevance == 3.2
+    assert config.retrieval_gates.weak_vector_only is False
+    assert config.retrieval_gates.facet_compatibility is False
+    assert config.retrieval_gates.memory_meta is False
+    assert config.retrieval_gates.low_information is False
+    assert config.retrieval_gates.project_status_anchor is False
+    assert config.retrieval_gates.personal_project is False
+    assert config.retrieval_gates.activation_anchor is False
+    assert config.retrieval_gates.strong_personal_anchor_reranker_bypass is False

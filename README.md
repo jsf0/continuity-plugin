@@ -110,6 +110,21 @@ memory:
     association_graph:
       enabled: true
 
+    # Optional precision/recall gates. Defaults are conservative; see
+    # docs/CONFIGURATION.md#retrieval-gate-tuning before changing.
+    retrieval_gates:
+      min_base_relevance: 0.35
+      min_vector_relevance: 0.05
+      min_vector_only_relevance: 2.75
+      weak_vector_only: true
+      facet_compatibility: true
+      memory_meta: true
+      low_information: true
+      project_status_anchor: true
+      personal_project: true
+      activation_anchor: true
+      strong_personal_anchor_reranker_bypass: true
+
     # Tier 0 memory: tiny, high-trust continuity records pinned every turn.
     pinned_system_prompt:
       enabled: true

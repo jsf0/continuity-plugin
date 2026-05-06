@@ -190,6 +190,7 @@ class ContinuityProvider(MemoryProvider):
             association_hop_decay=self._config.association_graph.hop_decay,
             association_activation_threshold=(self._config.association_graph.activation_threshold),
             association_max_hops=self._config.association_graph.max_hops,
+            gate_config=self._config.retrieval_gates,
         ).search(
             query,
             scope_project=effective_scope,
@@ -339,6 +340,7 @@ class ContinuityProvider(MemoryProvider):
                         self._config.association_graph.activation_threshold
                     ),
                     association_max_hops=self._config.association_graph.max_hops,
+                    gate_config=self._config.retrieval_gates,
                 ),
                 ensure_ascii=False,
             )
@@ -362,6 +364,7 @@ class ContinuityProvider(MemoryProvider):
                         self._config.association_graph.activation_threshold
                     ),
                     association_max_hops=self._config.association_graph.max_hops,
+                    gate_config=self._config.retrieval_gates,
                 ),
                 ensure_ascii=False,
             )

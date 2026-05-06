@@ -6,6 +6,7 @@ import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
+from .config import RetrievalGateConfig
 from .dynamic_expansion import propose_expansion_terms
 from .embeddings import VectorBackend
 from .models import ContextRecord, SkillLink
@@ -312,6 +313,7 @@ class ContinuityRetriever:
         association_hop_decay: float = 0.6,
         association_activation_threshold: float = 0.3,
         association_max_hops: int = 2,
+        gate_config: RetrievalGateConfig | None = None,
     ) -> None:
         self.store = store
         self.vector_backend = vector_backend
@@ -327,6 +329,7 @@ class ContinuityRetriever:
         self.association_hop_decay = max(0.0, min(1.0, association_hop_decay))
         self.association_activation_threshold = max(0.0, min(1.0, association_activation_threshold))
         self.association_max_hops = max(1, association_max_hops)
+        self.gate_config = gate_config or RetrievalGateConfig()
 
     def search(
         self,
@@ -393,7 +396,7 @@ class ContinuityRetriever:
                 if not include_stale and _is_inactive_or_expired(record):
                     continue
                 vector_score = max(0.0, vector_hit.score)
-                if vector_score < MIN_VECTOR_RELEVANCE:
+                if vector_score < self.gate_config.min_vector_relevance:
                     continue
                 candidate = candidates.setdefault(record.id, CandidateScore(record))
                 candidate.vector_score += vector_score * VECTOR_WEIGHT
@@ -456,40 +459,53 @@ class ContinuityRetriever:
         selected: list[CandidateScore] = []
         rejected: list[CandidateScore] = []
         for candidate in candidates.values():
-            if candidate.base_relevance < MIN_BASE_RELEVANCE:
+            if candidate.base_relevance < self.gate_config.min_base_relevance:
                 candidate.rejected_reason = "below_min_base_relevance"
                 rejected.append(candidate)
                 continue
-            if _is_weak_vector_only_candidate(candidate):
+            if self.gate_config.weak_vector_only and _is_weak_vector_only_candidate(
+                candidate, self.gate_config
+            ):
                 candidate.rejected_reason = "weak_vector_only_without_anchor"
                 rejected.append(candidate)
                 continue
             _apply_scope_score(candidate, expanded_tokens, effective_scope)
             _apply_boosts_and_penalties(candidate, personal_query=personal_query)
-            if memory_meta_query and not _memory_meta_record_allowed(
-                candidate.record, expanded_tokens, effective_scope
+            if (
+                self.gate_config.memory_meta
+                and memory_meta_query
+                and not _memory_meta_record_allowed(
+                    candidate.record, expanded_tokens, effective_scope
+                )
             ):
                 candidate.rejected_reason = "memory_meta_without_domain_anchor"
                 rejected.append(candidate)
                 continue
-            if memory_meta_query and not _candidate_matches_expansion_topic(
-                candidate, expanded_tokens, tokens
+            if (
+                self.gate_config.memory_meta
+                and memory_meta_query
+                and not _candidate_matches_expansion_topic(candidate, expanded_tokens, tokens)
             ):
                 candidate.rejected_reason = "memory_meta_topic_mismatch"
                 rejected.append(candidate)
                 continue
             record_facets = _facets_for_record(candidate.record)
-            if _memory_system_record_without_meta_query(
+            if self.gate_config.memory_meta and _memory_system_record_without_meta_query(
                 candidate.record, query_facets, record_facets
             ):
                 candidate.rejected_reason = "memory_system_record_without_meta_query"
                 rejected.append(candidate)
                 continue
-            if _facets_incompatible(query_facets, record_facets):
+            if self.gate_config.facet_compatibility and _facets_incompatible(
+                query_facets, record_facets
+            ):
                 candidate.rejected_reason = "facet_incompatible_candidate"
                 rejected.append(candidate)
                 continue
-            if candidate.record.kind == "active_project_state":
+            if (
+                self.gate_config.project_status_anchor
+                and candidate.record.kind == "active_project_state"
+            ):
                 strong_tokens = expanded_tokens - WEAK_ANCHOR_TOKENS
                 metadata_tokens = _record_metadata_tokens(candidate.record) | _query_tokens(
                     candidate.record.scope_project or ""
@@ -498,15 +514,23 @@ class ContinuityRetriever:
                     candidate.rejected_reason = "weak_project_status_candidate"
                     rejected.append(candidate)
                     continue
-            if personal_query and candidate.record.kind in PROJECT_STATUS_KINDS:
+            if (
+                self.gate_config.personal_project
+                and personal_query
+                and candidate.record.kind in PROJECT_STATUS_KINDS
+            ):
                 strong_tokens = expanded_tokens - WEAK_ANCHOR_TOKENS - {"personal"}
                 if not (strong_tokens & _record_anchor_tokens(candidate.record)):
                     candidate.rejected_reason = "personal_project_candidate_mismatch"
                     rejected.append(candidate)
                     continue
-            if _is_low_information_direct_query(expanded_tokens) and not (
-                _direct_low_information_candidate_allowed(
-                    candidate.record, expanded_tokens, effective_scope
+            if (
+                self.gate_config.low_information
+                and _is_low_information_direct_query(expanded_tokens)
+                and not (
+                    _direct_low_information_candidate_allowed(
+                        candidate.record, expanded_tokens, effective_scope
+                    )
                 )
             ):
                 candidate.rejected_reason = "low_information_direct_query"
@@ -570,7 +594,10 @@ class ContinuityRetriever:
             candidate.reranker_boost = candidate.reranker_score * self.reranker_weight
             candidate.reasons.append("reranker")
             if candidate.reranker_score < self.reranker_min_score:
-                if _reranker_rejection_overridden_by_strong_personal_anchor(candidate):
+                if (
+                    self.gate_config.strong_personal_anchor_reranker_bypass
+                    and _reranker_rejection_overridden_by_strong_personal_anchor(candidate)
+                ):
                     candidate.reasons.append("strong_personal_anchor")
                     continue
                 candidate.rejected_reason = "below_min_reranker_score"
@@ -612,15 +639,21 @@ class ContinuityRetriever:
             )
 
         for candidate in rejected:
-            if not _is_activation_only_seed(candidate):
+            if not _is_activation_only_seed(candidate, self.gate_config):
                 continue
-            if _is_low_information_activation_query(expanded_tokens):
+            if self.gate_config.low_information and _is_low_information_activation_query(
+                expanded_tokens
+            ):
                 candidate.rejected_reason = "low_information_query_activation_seed"
                 continue
-            if not _has_strong_activation_anchor(candidate, expanded_tokens, query_tokens):
+            if self.gate_config.activation_anchor and not _has_strong_activation_anchor(
+                candidate, expanded_tokens, query_tokens
+            ):
                 candidate.rejected_reason = "weak_anchor_activation_seed"
                 continue
-            if _facets_incompatible(query_facets, _facets_for_record(candidate.record)):
+            if self.gate_config.facet_compatibility and _facets_incompatible(
+                query_facets, _facets_for_record(candidate.record)
+            ):
                 candidate.rejected_reason = "facet_incompatible_activation_seed"
                 continue
             activation = _candidate_activation(candidate)
@@ -706,6 +739,7 @@ class ContinuityRetriever:
                     expanded_tokens=expanded_tokens,
                     query_facets=query_facets,
                     personal_query=personal_query,
+                    gate_config=self.gate_config,
                 )
                 if not neighbor_allowed:
                     trace["cut_neighbors"].append(
@@ -762,11 +796,14 @@ def _association_neighbor_allowed(
     expanded_tokens: set[str],
     query_facets: set[str],
     personal_query: bool,
+    gate_config: RetrievalGateConfig,
 ) -> tuple[bool, str]:
     """Gate graph-expanded neighbors so broad edges do not pollute context."""
-    if _facets_incompatible(query_facets, _facets_for_record(neighbor)):
+    if gate_config.facet_compatibility and _facets_incompatible(
+        query_facets, _facets_for_record(neighbor)
+    ):
         return False, "facet_incompatible_associative_neighbor"
-    if _memory_system_record_without_meta_query(
+    if gate_config.memory_meta and _memory_system_record_without_meta_query(
         neighbor, query_facets, _facets_for_record(neighbor)
     ):
         return False, "memory_system_neighbor_without_meta_query"
@@ -775,7 +812,8 @@ def _association_neighbor_allowed(
     ):
         return False, "mirror_neighbor_without_metadata_anchor"
     if (
-        personal_query
+        gate_config.personal_project
+        and personal_query
         and neighbor.kind in PROJECT_STATUS_KINDS
         and edge_type in GENERIC_ASSOCIATION_EDGE_TYPES
     ):
@@ -783,7 +821,8 @@ def _association_neighbor_allowed(
         if not expanded_tokens & neighbor_tokens:
             return False, "personal_project_neighbor_mismatch"
     if (
-        root_seed is not None
+        gate_config.personal_project
+        and root_seed is not None
         and root_seed.kind in PERSONAL_KINDS
         and neighbor.kind in PROJECT_STATUS_KINDS
         and edge_type in GENERIC_ASSOCIATION_EDGE_TYPES
@@ -792,7 +831,8 @@ def _association_neighbor_allowed(
         if not expanded_tokens & neighbor_tokens:
             return False, "personal_project_neighbor_mismatch"
     if (
-        source is not None
+        gate_config.personal_project
+        and source is not None
         and source.kind in PROJECT_STATUS_KINDS
         and neighbor.kind in PERSONAL_KINDS
         and edge_type in GENERIC_ASSOCIATION_EDGE_TYPES
@@ -849,7 +889,7 @@ def _candidate_activation(candidate: CandidateScore) -> float:
     return max(0.0, min(1.0, candidate.total / 5.0))
 
 
-def _is_activation_only_seed(candidate: CandidateScore) -> bool:
+def _is_activation_only_seed(candidate: CandidateScore, gate_config: RetrievalGateConfig) -> bool:
     """Allow strong anchored candidates rejected by direct reranking to light the graph."""
     if candidate.rejected_reason != "below_min_reranker_score":
         return False
@@ -862,7 +902,7 @@ def _is_activation_only_seed(candidate: CandidateScore) -> bool:
             candidate.text_score,
         )
     )
-    return has_anchor and candidate.base_relevance >= MIN_BASE_RELEVANCE
+    return has_anchor and candidate.base_relevance >= gate_config.min_base_relevance
 
 
 def _is_low_information_activation_query(tokens: set[str]) -> bool:
@@ -1053,7 +1093,9 @@ def _apply_metadata_score(candidate: CandidateScore, tokens: set[str]) -> None:
         candidate.reasons.append("text")
 
 
-def _is_weak_vector_only_candidate(candidate: CandidateScore) -> bool:
+def _is_weak_vector_only_candidate(
+    candidate: CandidateScore, gate_config: RetrievalGateConfig
+) -> bool:
     """Return true when semantic recall has no non-vector evidence.
 
     Neural/vector similarity is useful for paraphrases, but low-to-medium
@@ -1070,7 +1112,7 @@ def _is_weak_vector_only_candidate(candidate: CandidateScore) -> bool:
             candidate.text_score,
         )
     )
-    return not has_anchor and 0 < candidate.vector_score < MIN_VECTOR_ONLY_RELEVANCE
+    return not has_anchor and 0 < candidate.vector_score < gate_config.min_vector_only_relevance
 
 
 def _apply_scope_score(
