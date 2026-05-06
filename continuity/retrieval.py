@@ -6,10 +6,12 @@ import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
+from .dynamic_expansion import propose_expansion_terms
 from .embeddings import VectorBackend
 from .models import ContextRecord, SkillLink
 from .reranking import RerankerBackend
 from .store import ContinuityStore
+from .vocabulary import CorpusTermStats
 
 SCOPE_BONUS = 1.0
 CAPSULE_SCOPE_BONUS = 2.0
@@ -31,6 +33,8 @@ TRUST_PENALTIES = {
 }
 
 ALIASES = {
+    # Keep only language/tooling-normalization aliases here.  Domain expansion is
+    # derived dynamically from stored record metadata in dynamic_expansion.py.
     "subagent": {"delegate_task", "delegation", "worker"},
     "subagents": {"delegate_task", "delegation", "worker"},
     "agent": {"subagent"},
@@ -40,23 +44,6 @@ ALIASES = {
     "timed": {"timeout"},
     "timeout": {"timeout", "hung", "stuck"},
     "timeouts": {"timeout"},
-    "cleanup": {"foundation", "foundation-first"},
-    "boat": {"sailboat", "catamaran", "dinghy", "trailerable", "sailing"},
-    "boats": {"boat", "sailboat", "catamaran", "dinghy", "trailerable", "sailing"},
-    "tow": {
-        "towing",
-        "towed",
-        "trailer",
-        "trailerable",
-        "hitch",
-        "vehicle",
-        "truck",
-        "raptor",
-    },
-    "towing": {"tow", "trailer", "trailerable", "hitch", "vehicle", "truck", "raptor"},
-    "trailer": {"tow", "towing", "trailerable", "hitch"},
-    "setup": {"vehicle", "personal_setup"},
-    "proxy": {"guard-proxy"},
 }
 
 STOPWORDS = frozenset(
@@ -72,6 +59,7 @@ STOPWORDS = frozenset(
         "can",
         "current",
         "do",
+        "did",
         "doing",
         "for",
         "fix",
@@ -93,6 +81,7 @@ STOPWORDS = frozenset(
         "should",
         "state",
         "the",
+        "that",
         "thing",
         "thinking",
         "to",
@@ -103,6 +92,7 @@ STOPWORDS = frozenset(
         "we",
         "what",
         "when",
+        "why",
         "with",
         "without",
     }
@@ -202,12 +192,10 @@ FACET_TOKEN_MAP = {
             "cli",
             "plugin",
             "python",
-            "rust",
             "test",
             "docs",
-            "guard-proxy",
-            "spki",
-            "reqwest",
+            "routing",
+            "middleware",
         }
     ),
     "personal_hardware": frozenset(
@@ -222,23 +210,18 @@ FACET_TOKEN_MAP = {
             "bios",
             "boot",
             "usb",
-            "secure",
-            "openbsd",
-            "ryzen",
+            "workstation",
         }
     ),
     "memory_system": MEMORY_META_INTENT_TOKENS
     | frozenset({"memory", "record", "prefetch", "provider", "association-graph"}),
     "vehicle_towing": frozenset(
-        {"vehicle", "truck", "towing", "tow", "trailer", "trailerable", "hitch", "raptor"}
+        {"vehicle", "truck", "van", "towing", "tow", "trailer", "hitch", "camper"}
     ),
-    "boating": frozenset({"boat", "sailboat", "catamaran", "hobie", "catalina", "sailing", "lake"}),
     "personal_preference": PREFERENCE_QUERY_TOKENS
     | frozenset({"methodical", "thorough", "correct", "discuss", "done", "work_style"}),
-    "model_eval": frozenset({"model", "llm", "nemotron", "programming", "eval"}),
-    "devops_security": frozenset(
-        {"guard-proxy", "spki", "reqwest", "rustls", "detector", "deployment", "security"}
-    ),
+    "model_eval": frozenset({"model", "llm", "programming", "eval"}),
+    "devops_security": frozenset({"deployment", "security", "detector"}),
 }
 
 INCOMPATIBLE_FACET_PAIRS = frozenset(
@@ -246,11 +229,9 @@ INCOMPATIBLE_FACET_PAIRS = frozenset(
         frozenset({"software_project", "personal_hardware"}),
         frozenset({"memory_system", "personal_hardware"}),
         frozenset({"memory_system", "vehicle_towing"}),
-        frozenset({"memory_system", "boating"}),
         frozenset({"personal_preference", "software_project"}),
         frozenset({"personal_preference", "memory_system"}),
         frozenset({"personal_preference", "personal_hardware"}),
-        frozenset({"personal_preference", "boating"}),
         frozenset({"personal_preference", "vehicle_towing"}),
     }
 )
@@ -427,6 +408,50 @@ class ContinuityRetriever:
                 candidates.pop(record.id, None)
                 continue
 
+        dynamic_expansion = []
+        if not _is_low_information_direct_query(expanded_tokens):
+            expansion_candidates = [
+                candidate
+                for candidate in candidates.values()
+                if not _facets_incompatible(query_facets, _facets_for_record(candidate.record))
+                and not _memory_system_record_without_meta_query(
+                    candidate.record, query_facets, _facets_for_record(candidate.record)
+                )
+            ]
+            dynamic_expansion = propose_expansion_terms(
+                expanded_tokens,
+                expansion_candidates,
+                self.store,
+                CorpusTermStats.from_records(
+                    record
+                    for record in self.store.list_records()
+                    if include_stale or not _is_inactive_or_expired(record)
+                ),
+            )
+        expansion_tokens = {term.term for term in dynamic_expansion}
+        if expansion_tokens:
+            new_tokens = expansion_tokens - expanded_tokens
+            expanded_tokens |= expansion_tokens
+            query_facets = _facets_for_tokens(expanded_tokens)
+            fts_query = " ".join(sorted(new_tokens))
+            if fts_query:
+                for hit in self.store.fts_search(fts_query, limit=max(limit * 6, 30)):
+                    if not include_stale and _is_inactive_or_expired(hit.record):
+                        continue
+                    candidate = candidates.setdefault(hit.record.id, CandidateScore(hit.record))
+                    candidate.fts_score += max(0.0, 1.0 / (1.0 + abs(hit.rank))) * FTS_WEIGHT
+                    if "fts" not in candidate.reasons:
+                        candidate.reasons.append("fts")
+            for record in self.store.list_records():
+                if not include_stale and _is_inactive_or_expired(record):
+                    continue
+                candidate = candidates.setdefault(record.id, CandidateScore(record))
+                before = candidate.base_relevance
+                _apply_metadata_score(candidate, new_tokens)
+                if before <= 0 and candidate.base_relevance <= 0:
+                    candidates.pop(record.id, None)
+                    continue
+
         selected: list[CandidateScore] = []
         rejected: list[CandidateScore] = []
         for candidate in candidates.values():
@@ -457,6 +482,12 @@ class ContinuityRetriever:
                 candidate.rejected_reason = "facet_incompatible_candidate"
                 rejected.append(candidate)
                 continue
+            if personal_query and candidate.record.kind in PROJECT_STATUS_KINDS:
+                strong_tokens = expanded_tokens - WEAK_ANCHOR_TOKENS - {"personal"}
+                if not (strong_tokens & _record_anchor_tokens(candidate.record)):
+                    candidate.rejected_reason = "personal_project_candidate_mismatch"
+                    rejected.append(candidate)
+                    continue
             if _is_low_information_direct_query(expanded_tokens) and not (
                 _direct_low_information_candidate_allowed(
                     candidate.record, expanded_tokens, effective_scope
@@ -489,6 +520,7 @@ class ContinuityRetriever:
             "query": query,
             "tokens": sorted(tokens),
             "expanded_tokens": sorted(expanded_tokens),
+            "dynamic_expansion": [term.to_dict() for term in dynamic_expansion],
             "selected": selected[:limit],
             "rejected": rejected,
             "activation_trace": activation_trace,
@@ -1107,8 +1139,6 @@ def _expand_tokens(tokens: set[str]) -> set[str]:
 
 def _normalize_token(token: str) -> str:
     token = token.lower().strip()
-    if token in {"guard_proxy", "guardproxy"}:
-        return "guard-proxy"
     return _singularize(token)
 
 

@@ -8,6 +8,7 @@ import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
+from .association import association_strength
 from .models import AssociationEdge, ContextRecord, SkillLink, SourceRef, utc_now
 from .security import sanitize_observation_text
 
@@ -542,10 +543,13 @@ class ContinuityStore:
         threshold: float,
         out_degree_cap: int,
     ) -> None:
+        from .vocabulary import CorpusTermStats
+
+        stats = CorpusTermStats.from_records([record, *existing_records])
         for other in existing_records:
             if other.id == record.id:
                 continue
-            strength, edge_type = _association_strength(record, other)
+            strength, edge_type = association_strength(record, other, stats=stats)
             if strength >= threshold:
                 self.upsert_association_edge(
                     record.id,
@@ -855,149 +859,6 @@ def _skill_link_from_row(row: sqlite3.Row) -> SkillLink:
             "last_used_at": row["last_used_at"],
         }
     )
-
-
-GENERIC_ASSOCIATION_TOKENS = frozenset(
-    {
-        "active project state",
-        "a",
-        "an",
-        "and",
-        "as",
-        "for",
-        "built in memory",
-        "environment fact",
-        "global",
-        "has",
-        "have",
-        "hermes",
-        "hermes memory",
-        "likely",
-        "memory",
-        "memory target memory",
-        "memory target user",
-        "ordered",
-        "preference",
-        "preferences",
-        "project",
-        "project convention",
-        "project status",
-        "status",
-        "the",
-        "user",
-        "user preference",
-        "with",
-    }
-)
-
-
-def _association_strength(left: ContextRecord, right: ContextRecord) -> tuple[float, str]:
-    left_entities = _association_value_tokens(left.entities)
-    right_entities = _association_value_tokens(right.entities)
-    left_tags = _association_value_tokens(left.tags)
-    right_tags = _association_value_tokens(right.tags)
-    left_text = _association_text_tokens(left)
-    right_text = _association_text_tokens(right)
-
-    if _only_generic_mirror_overlap(
-        left, right, left_entities, right_entities, left_tags, right_tags
-    ):
-        return 0.0, "generic_mirror_overlap"
-
-    entity_overlap = _jaccard(left_entities, right_entities)
-    tag_overlap = _jaccard(left_tags, right_tags)
-    semantic_similarity = _jaccard(left_text, right_text)
-
-    strength = min(
-        1.0,
-        (0.35 if entity_overlap > 0 else 0.0)
-        + (0.15 if tag_overlap > 0 else 0.0)
-        + entity_overlap * 0.6
-        + tag_overlap * 0.55
-        + semantic_similarity * 0.3,
-    )
-    if entity_overlap > 0:
-        edge_type = "entity_overlap"
-    elif tag_overlap > 0:
-        edge_type = "tag_overlap"
-    elif semantic_similarity > 0:
-        edge_type = "semantic_similarity"
-    else:
-        edge_type = "combined"
-    return strength, edge_type
-
-
-def _only_generic_mirror_overlap(
-    left: ContextRecord,
-    right: ContextRecord,
-    left_entities: set[str],
-    right_entities: set[str],
-    left_tags: set[str],
-    right_tags: set[str],
-) -> bool:
-    """Avoid edges formed only by built-in-memory mirror boilerplate."""
-    if not (_is_builtin_mirror(left) and _is_builtin_mirror(right)):
-        return False
-    entity_overlap = left_entities & right_entities
-    tag_overlap = left_tags & right_tags
-    # If mirrored records share no meaningful domain entity and only share the
-    # built-in-memory/source/kind boilerplate, the edge is harmful noise.
-    meaningful_entity_overlap = {
-        token for token in entity_overlap if token not in GENERIC_ASSOCIATION_TOKENS
-    }
-    meaningful_tag_overlap = {
-        token for token in tag_overlap if token not in GENERIC_ASSOCIATION_TOKENS
-    }
-    return not meaningful_entity_overlap and not meaningful_tag_overlap
-
-
-def _is_builtin_mirror(record: ContextRecord) -> bool:
-    return record.trust_level == "built_in_memory_mirror" and record.title.lower() in {
-        "hermes global memory",
-        "hermes user memory",
-    }
-
-
-def _association_text_tokens(record: ContextRecord) -> set[str]:
-    import re
-
-    text = " ".join(
-        [
-            record.title,
-            record.summary,
-            record.details or "",
-            *record.tags,
-            *record.entities,
-        ]
-    ).lower()
-    return {
-        token
-        for raw in re.findall(r"[\w:-]+", text)
-        if (token := _normalize_association_token(raw))
-        and len(token) > 2
-        and token not in GENERIC_ASSOCIATION_TOKENS
-    }
-
-
-def _association_value_tokens(values: list[str]) -> set[str]:
-    return {
-        token
-        for value in values
-        if (token := _normalize_association_token(value))
-        and token not in GENERIC_ASSOCIATION_TOKENS
-    }
-
-
-def _normalize_association_token(value: str) -> str:
-    import re
-
-    return re.sub(r"[^a-z0-9]+", " ", value.lower()).strip()
-
-
-def _jaccard(left: set[str], right: set[str]) -> float:
-    if not left or not right:
-        return 0.0
-    return len(left & right) / len(left | right)
 
 
 def _index_text(values: list[str]) -> str:

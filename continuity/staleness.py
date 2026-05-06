@@ -250,9 +250,11 @@ def _project_status_key(record: ContextRecord) -> str | None:
         entity_terms = _terms(entity)
         if entity_terms:
             return " ".join(sorted(entity_terms))
-    known_project_terms = {"guard-proxy", "hermes-agent", "continuity", "llama.cpp"}
-    matches = sorted(terms & known_project_terms)
-    return matches[0] if matches else None
+    # Fall back to the rarest non-generic summary/tag/entity term rather than a
+    # public-code list of project names.  Explicit entities remain preferred.
+    generic = {"status", "project", "current", "update", "updates", "state"}
+    candidates = sorted(term for term in terms if term not in generic and len(term) >= 4)
+    return candidates[0] if candidates else None
 
 
 def _shared_terms(left: str, right: str) -> int:

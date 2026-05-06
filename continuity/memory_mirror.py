@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import re
 
+from .metadata_extraction import extract_metadata
 from .models import ContextRecord, SourceRef, utc_now
 from .security import is_safe_memory_text, redact_sensitive_text, truncate_text
 
@@ -49,14 +50,15 @@ def build_mirrored_memory_record(
         label=f"Hermes memory {normalized_action}",
         created_at=utc_now(),
     )
+    extracted = extract_metadata(sanitized)
     return ContextRecord.new(
         id=mirrored_memory_record_id(normalized_target, content),
         kind=kind,
         title=_title_for_target(normalized_target),
         summary=sanitized,
         scope_project=record_scope,
-        tags=_tags_for_record(normalized_target, kind, sanitized),
-        entities=_entities_for_record(sanitized),
+        tags=_tags_for_record(normalized_target, kind, extracted.tags),
+        entities=list(extracted.entities),
         sources=[source],
         confidence=0.9,
         importance=0.75,
@@ -120,38 +122,10 @@ def _title_for_target(target: str) -> str:
     return "Hermes global memory"
 
 
-def _tags_for_record(target: str, kind: str, content: str) -> list[str]:
-    normalized = content.lower()
+def _tags_for_record(target: str, kind: str, extracted_tags: tuple[str, ...]) -> list[str]:
     tags = {"built_in_memory", f"memory_target:{target}", kind}
-    if "ford raptor" in normalized or "raptor" in normalized:
-        tags.update({"vehicle", "towing", "tow", "truck", "boat", "trailer", "personal_setup"})
-    if any(term in normalized for term in ("boat", "catamaran", "sailing", "sailboat")):
-        tags.update({"boat", "sailing", "storage", "trailerable"})
-    if "framework desktop" in normalized or "ryzen ai max" in normalized:
-        tags.update({"hardware", "framework", "local_llm", "llama_cpp"})
-    if "llama.cpp" in normalized or "llama-cpp" in normalized:
-        tags.update({"llama_cpp", "local_llm"})
-    if "guard-proxy" in normalized:
-        tags.update({"guard-proxy", "rust", "proxy", "project_status"})
+    tags.update(extracted_tags)
     return sorted(tags)
-
-
-def _entities_for_record(content: str) -> list[str]:
-    normalized = content.lower()
-    entities: set[str] = set()
-    if "2018 ford raptor" in normalized:
-        entities.update({"2018 Ford Raptor", "Ford Raptor", "Raptor"})
-    elif "ford raptor" in normalized or "raptor" in normalized:
-        entities.update({"Ford Raptor", "Raptor"})
-    if "framework desktop" in normalized:
-        entities.add("Framework Desktop")
-    if "ryzen ai max 395" in normalized:
-        entities.add("Ryzen AI Max 395")
-    if "guard-proxy" in normalized:
-        entities.add("guard-proxy")
-    if "catamaran" in normalized:
-        entities.add("catamaran")
-    return sorted(entities)
 
 
 def _contains_any(text: str, terms: frozenset[str]) -> bool:
