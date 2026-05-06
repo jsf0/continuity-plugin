@@ -55,6 +55,25 @@ Labels are opaque key/value strings. Runtime retrieval compares them generically
 
 The run propagates context labels through `inventory.jsonl`, `segments.jsonl`, candidate `ingestion.context`, generated retrieval eval `query_context`, and imported `ContextRecord.quality["context"]`. `inventory` and `refresh` accept the same context options so source inventories stay comparable across refresh runs.
 
+For reusable corpora, put defaults in a JSON profile and pass `--profile` to `run`, `inventory`, or `refresh`:
+
+```json
+{
+  "recipe": "docs",
+  "include": ["**/*.md"],
+  "project": "openbsd-manpages",
+  "policy": "require-review",
+  "context": {
+    "labels": {"os": "openbsd"},
+    "partition_keys": ["os"],
+    "identity_keys": ["command"],
+    "collision_risk": "high"
+  }
+}
+```
+
+Command-line flags override profile defaults, including `--context` labels.
+
 ## Scale/debug statistics
 
 Every `run` writes `ingestion-stats.json`. This is the first place to look when stress testing large corpora.

@@ -38,6 +38,7 @@ def _build_parser() -> argparse.ArgumentParser:
     inventory.add_argument("path")
     _add_include_exclude(inventory)
     _add_context_args(inventory)
+    _add_profile_arg(inventory)
     inventory.add_argument("--project")
     inventory.add_argument("--repo")
     inventory.add_argument("--collection")
@@ -51,15 +52,16 @@ def _build_parser() -> argparse.ArgumentParser:
 
     run = subcommands.add_parser("run", help="Run dry inventory and segmentation pipeline")
     run.add_argument("path")
-    run.add_argument("--recipe", default="docs")
+    run.add_argument("--recipe")
     run.add_argument("--run-id")
     run.add_argument("--created-at")
     _add_include_exclude(run)
     _add_context_args(run)
+    _add_profile_arg(run)
     run.add_argument("--project")
     run.add_argument("--repo")
     run.add_argument("--collection")
-    run.add_argument("--policy", default="conservative")
+    run.add_argument("--policy")
     run.add_argument(
         "--extractor",
         choices=["deterministic", "llm", "deterministic,llm"],
@@ -108,6 +110,7 @@ def _build_parser() -> argparse.ArgumentParser:
     refresh.add_argument("--previous-inventory", required=True)
     _add_include_exclude(refresh)
     _add_context_args(refresh)
+    _add_profile_arg(refresh)
     refresh.add_argument("--project")
     refresh.add_argument("--repo")
     refresh.add_argument("--collection")
@@ -124,6 +127,10 @@ def _add_include_exclude(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--exclude", action="append")
 
 
+def _add_profile_arg(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--profile", help="JSON corpus ingestion profile with defaults")
+
+
 def _add_context_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--context", action="append", default=[], metavar="KEY=VALUE")
     parser.add_argument("--partition-key", action="append", default=[])
@@ -132,28 +139,41 @@ def _add_context_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--collision-risk", choices=["normal", "high"], default="normal")
 
 
-def _parse_context_args(args: argparse.Namespace) -> dict[str, object]:
+def _parse_context_args(
+    args: argparse.Namespace, profile: dict[str, object] | None = None
+) -> dict[str, object]:
     labels: dict[str, str] = {}
-    for item in getattr(args, "context", []) or []:
-        if "=" not in item:
-            raise SystemExit(f"--context must be KEY=VALUE, got {item!r}")
-        key, value = item.split("=", 1)
-        labels[key] = value
-    raw_context = {
-        "labels": labels,
-        "partition_keys": getattr(args, "partition_key", []) or [],
-        "soft_keys": getattr(args, "soft_key", []) or [],
-        "identity_keys": getattr(args, "identity_key", []) or [],
-        "collision_risk": getattr(args, "collision_risk", "normal"),
-    }
+    context_args = getattr(args, "context", []) or []
+    if context_args:
+        for item in context_args:
+            if "=" not in item:
+                raise SystemExit(f"--context must be KEY=VALUE, got {item!r}")
+            key, value = item.split("=", 1)
+            labels[key] = value
+        raw_context = {
+            "labels": labels,
+            "partition_keys": getattr(args, "partition_key", []) or [],
+            "soft_keys": getattr(args, "soft_key", []) or [],
+            "identity_keys": getattr(args, "identity_key", []) or [],
+            "collision_risk": getattr(args, "collision_risk", "normal"),
+        }
+    else:
+        profile_context = (profile or {}).get("context", {})
+        raw_context = profile_context if isinstance(profile_context, dict) else {}
+        labels = (
+            dict(raw_context.get("labels", {}))
+            if isinstance(raw_context.get("labels"), dict)
+            else {}
+        )
     label_set = context_from_mapping(raw_context)
     if labels and len(label_set.labels) != len(labels):
         raise SystemExit("invalid --context label: keys and values must be non-empty safe atoms")
-    invalid_policy_keys = sorted(
-        set(raw_context["partition_keys"])
-        | set(raw_context["soft_keys"])
-        | set(raw_context["identity_keys"]) - set(label_set.labels)
+    raw_policy_keys = (
+        set(raw_context.get("partition_keys", []))
+        | set(raw_context.get("soft_keys", []))
+        | set(raw_context.get("identity_keys", []))
     )
+    invalid_policy_keys = sorted(raw_policy_keys - set(label_set.labels))
     if labels and invalid_policy_keys:
         raise SystemExit(
             "invalid context policy key(s): "
@@ -163,16 +183,43 @@ def _parse_context_args(args: argparse.Namespace) -> dict[str, object]:
     return context_to_mapping(label_set)
 
 
+def _load_profile(args: argparse.Namespace) -> dict[str, object]:
+    profile_path = getattr(args, "profile", None)
+    if not profile_path:
+        return {}
+    payload = json.loads(Path(profile_path).read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise SystemExit("--profile must point to a JSON object")
+    return dict(payload)
+
+
+def _profile_list(profile: dict[str, object], key: str) -> list[str] | None:
+    value = profile.get(key)
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return [value]
+    if not isinstance(value, list):
+        raise SystemExit(f"profile field {key!r} must be a string or list")
+    return [str(item) for item in value]
+
+
+def _profile_str(profile: dict[str, object], key: str, default: str | None = None) -> str | None:
+    value = profile.get(key, default)
+    return str(value) if value is not None else None
+
+
 def _cmd_inventory(args: argparse.Namespace) -> None:
+    profile = _load_profile(args)
     result = IngestionPipeline().connector.discover(
         args.path,
-        include=args.include,
-        exclude=args.exclude,
-        project=args.project,
-        repo=args.repo,
-        collection=args.collection,
+        include=args.include or _profile_list(profile, "include"),
+        exclude=args.exclude or _profile_list(profile, "exclude"),
+        project=args.project or _profile_str(profile, "project"),
+        repo=args.repo or _profile_str(profile, "repo"),
+        collection=args.collection or _profile_str(profile, "collection"),
     )
-    context = _parse_context_args(args)
+    context = _parse_context_args(args, profile)
     documents = []
     for document in result:
         if document.source_type == "binary":
@@ -195,22 +242,25 @@ def _cmd_segment(args: argparse.Namespace) -> None:
 
 
 def _cmd_run(args: argparse.Namespace) -> None:
+    profile = _load_profile(args)
     IngestionPipeline().run_dry_inventory_and_segment(
         roots=[args.path],
         output_dir=args.output,
-        recipe=args.recipe,
-        run_id=args.run_id,
-        created_at=args.created_at,
-        include=args.include,
-        exclude=args.exclude,
-        project=args.project,
-        repo=args.repo,
-        collection=args.collection,
-        review_policy=args.policy,
+        recipe=args.recipe or _profile_str(profile, "recipe", "docs") or "docs",
+        run_id=args.run_id or _profile_str(profile, "run_id"),
+        created_at=args.created_at or _profile_str(profile, "created_at"),
+        include=args.include or _profile_list(profile, "include"),
+        exclude=args.exclude or _profile_list(profile, "exclude"),
+        project=args.project or _profile_str(profile, "project"),
+        repo=args.repo or _profile_str(profile, "repo"),
+        collection=args.collection or _profile_str(profile, "collection"),
+        review_policy=args.policy
+        or _profile_str(profile, "policy", "conservative")
+        or "conservative",
         extractor_mode=args.extractor,
         llm_command=args.llm_command,
         resume=args.resume,
-        context=_parse_context_args(args),
+        context=_parse_context_args(args, profile),
     )
 
 
@@ -274,16 +324,17 @@ def _cmd_validate_import(args: argparse.Namespace) -> int:
 
 
 def _cmd_refresh(args: argparse.Namespace) -> None:
+    profile = _load_profile(args)
     planner = RefreshPlanner()
     current_documents = planner.discover_current(
         args.path,
-        include=args.include,
-        exclude=args.exclude,
-        project=args.project,
-        repo=args.repo,
-        collection=args.collection,
+        include=args.include or _profile_list(profile, "include"),
+        exclude=args.exclude or _profile_list(profile, "exclude"),
+        project=args.project or _profile_str(profile, "project"),
+        repo=args.repo or _profile_str(profile, "repo"),
+        collection=args.collection or _profile_str(profile, "collection"),
     )
-    context = _parse_context_args(args)
+    context = _parse_context_args(args, profile)
     if context["labels"]:
         from dataclasses import replace
 

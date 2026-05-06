@@ -322,3 +322,74 @@ def test_cli_rejects_invalid_context_label(tmp_path) -> None:
         )
 
     assert "invalid --context label" in str(excinfo.value)
+
+
+def test_cli_run_loads_reusable_corpus_profile(tmp_path) -> None:
+    profile = tmp_path / "openbsd-profile.json"
+    profile.write_text(
+        json.dumps(
+            {
+                "recipe": "docs",
+                "include": ["README.md"],
+                "project": "profile-project",
+                "policy": "safe-auto",
+                "context": {
+                    "labels": {"os": "openbsd"},
+                    "partition_keys": ["os"],
+                    "collision_risk": "high",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    output_dir = tmp_path / "profile-run"
+
+    exit_code = main(
+        [
+            "run",
+            str(FIXTURE_ROOT),
+            "--profile",
+            str(profile),
+            "--output",
+            str(output_dir),
+        ]
+    )
+
+    assert exit_code == 0
+    manifest = json.loads((output_dir / "manifest.json").read_text(encoding="utf-8"))
+    candidates = read_jsonl(output_dir / "candidate-records.jsonl")
+    assert manifest["recipe"] == "docs"
+    assert candidates[0]["scope_project"] == "profile-project"
+    assert candidates[0]["ingestion"]["context"]["labels"] == {"os": "openbsd"}
+
+
+def test_cli_flags_override_profile_context(tmp_path) -> None:
+    profile = tmp_path / "profile.json"
+    profile.write_text(
+        json.dumps({"context": {"labels": {"os": "linux"}, "partition_keys": ["os"]}}),
+        encoding="utf-8",
+    )
+    output_dir = tmp_path / "override-run"
+
+    exit_code = main(
+        [
+            "run",
+            str(FIXTURE_ROOT),
+            "--profile",
+            str(profile),
+            "--include",
+            "README.md",
+            "--policy",
+            "safe-auto",
+            "--context",
+            "os=openbsd",
+            "--partition-key",
+            "os",
+            "--output",
+            str(output_dir),
+        ]
+    )
+
+    assert exit_code == 0
+    candidates = read_jsonl(output_dir / "candidate-records.jsonl")
+    assert candidates[0]["ingestion"]["context"]["labels"] == {"os": "openbsd"}
