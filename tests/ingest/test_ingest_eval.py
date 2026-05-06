@@ -133,8 +133,8 @@ def test_eval_runner_fails_when_expected_title_is_not_in_required_top_k(tmp_path
 
     result = EvalRunner(store).run_case(eval_case)
 
-    assert result.passed is True
-    assert result.top_k_failures == []
+    assert result.passed is False
+    assert result.top_k_failures == [expected.title]
 
 
 def test_eval_runner_fails_when_forbidden_title_is_retrieved(tmp_path) -> None:
@@ -153,3 +153,32 @@ def test_eval_runner_fails_when_forbidden_title_is_retrieved(tmp_path) -> None:
 
     assert result.passed is False
     assert result.forbidden_title_matches == [candidate.title]
+
+
+def test_eval_runner_uses_continuity_retriever_query_expansion(tmp_path) -> None:
+    store = ContinuityStore(tmp_path / "continuity.db")
+    candidate = CandidateRecord(
+        candidate_id="cand_delegate_timeout",
+        kind="lesson_learned",
+        title="delegate_task timeout behavior",
+        summary="delegate_task can time out before child agents report API calls.",
+        scope_project="eval-fixture",
+        tags=["delegate_task", "timeout"],
+        entities=["api_calls:0"],
+        confidence=0.9,
+        importance=0.8,
+        source_refs=[SourceRef(type="file", uri="file://delegation.md")],
+    )
+    ContinuityImporter(store).import_records([candidate], dry_run=False)
+    eval_case = EvalCase(
+        eval_id="eval_alias_expansion",
+        query="what happened when the subagent got stuck",
+        expected_record_titles=[candidate.title],
+        expected_tags=["delegate-task"],
+        scope_project="eval-fixture",
+    )
+
+    result = EvalRunner(store).run_case(eval_case)
+
+    assert result.passed is True
+    assert result.matched_titles == [candidate.title]

@@ -8,6 +8,7 @@ from typing import Any
 
 from continuity.ingest.jsonl import read_jsonl, write_jsonl
 from continuity.ingest.models import CandidateRecord, stable_id
+from continuity.retrieval import ContinuityRetriever
 from continuity.store import ContinuityStore
 
 
@@ -119,15 +120,12 @@ class EvalRunner:
         self.limit = limit
 
     def run_case(self, eval_case: EvalCase) -> EvalCaseResult:
-        hits = self.store.fts_search(eval_case.query, limit=self.limit)
+        hits = ContinuityRetriever(self.store).search(
+            eval_case.query,
+            scope_project=eval_case.scope_project,
+            limit=self.limit,
+        )
         records = [hit.record for hit in hits]
-        if eval_case.scope_project:
-            records = [
-                record
-                for record in records
-                if record.scope_project in {None, eval_case.scope_project}
-                or record.scope_project == eval_case.scope_project
-            ]
         selected_titles = [record.title for record in records]
         selected_tags = _unique_tags(records)
         matched_titles = [

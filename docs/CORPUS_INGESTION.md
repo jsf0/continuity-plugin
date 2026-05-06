@@ -79,7 +79,7 @@ uv run continuity-ingest validate-import \
   --report /tmp/continuity-ingest-my-project/temp-eval-report.jsonl
 ```
 
-`validate-import` imports into a temporary SQLite DB and exits nonzero if import or eval fails. It does not touch your live continuity DB.
+`validate-import` imports into a temporary SQLite DB and exits nonzero if import or eval fails. It does not touch your live continuity DB. Retrieval evals use the same `ContinuityRetriever` path as runtime search, including query expansion, metadata scoring, retrieval gates, and scope handling; they are not raw FTS-only checks.
 
 ## Import only after review
 
