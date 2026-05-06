@@ -181,3 +181,26 @@ def test_pipeline_propagates_run_context_labels_to_artifacts_and_evals(tmp_path)
     assert stats["context"]["documents_with_labels"] == 1
     assert stats["context"]["candidates_with_labels"] == 1
     assert stats["context"]["by_partition_key"] == {"customer": 1}
+
+
+def test_pipeline_preserves_context_on_candidate_source_refs(tmp_path) -> None:
+    output_dir = tmp_path / "run-source-ref-context"
+
+    IngestionPipeline().run_dry_inventory_and_segment(
+        roots=[FIXTURE_ROOT],
+        output_dir=output_dir,
+        recipe="docs",
+        run_id="run-source-ref-context",
+        created_at="2026-05-06T21:00:00Z",
+        include=["README.md"],
+        project="continuity-ingestion-fixture",
+        context={
+            "labels": {"customer": "acme"},
+            "partition_keys": ["customer"],
+            "collision_risk": "high",
+        },
+    )
+
+    candidates = read_jsonl(output_dir / "candidate-records.jsonl")
+
+    assert candidates[0]["source_refs"][0]["metadata"]["context"]["labels"] == {"customer": "acme"}

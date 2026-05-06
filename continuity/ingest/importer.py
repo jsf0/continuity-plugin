@@ -99,6 +99,7 @@ def candidate_to_context_record(candidate: CandidateRecord) -> ContextRecord:
                     "candidate_id": candidate.candidate_id,
                     "source_refs": [source_ref.to_dict() for source_ref in candidate.source_refs],
                     "summary": candidate.summary,
+                    "context": context_payload if context_payload["labels"] else {},
                 }
             ),
         }

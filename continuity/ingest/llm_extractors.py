@@ -323,7 +323,13 @@ def _enrich_candidate_dict(
 
 def _source_ref(document: SourceDocument, segment: SourceSegment) -> SourceRef:
     metadata: dict[str, Any] = {}
-    for key in ("contains_example", "contains_code_block", "contains_table", "heading_path"):
+    for key in (
+        "contains_example",
+        "contains_code_block",
+        "contains_table",
+        "heading_path",
+        "context",
+    ):
         if key in segment.metadata:
             metadata[key] = segment.metadata[key]
     return SourceRef(

@@ -154,6 +154,10 @@ class EvalCaseGenerator:
 
 
 def _source_ref(document: SourceDocument, segment: SourceSegment) -> SourceRef:
+    metadata: dict[str, object] = {}
+    context = segment.metadata.get("context")
+    if isinstance(context, dict) and context.get("labels"):
+        metadata["context"] = dict(context)
     return SourceRef(
         type="file" if document.uri.startswith("file://") else document.source_type,
         uri=document.uri,
@@ -165,6 +169,7 @@ def _source_ref(document: SourceDocument, segment: SourceSegment) -> SourceRef:
         content_hash=str(segment.metadata.get("content_hash"))
         if segment.metadata.get("content_hash")
         else None,
+        metadata=metadata,
     )
 
 

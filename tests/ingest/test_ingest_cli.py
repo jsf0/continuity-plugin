@@ -4,6 +4,8 @@ import json
 import shutil
 from pathlib import Path
 
+import pytest
+
 from continuity.ingest.cli import main
 from continuity.ingest.jsonl import read_jsonl, write_jsonl
 from continuity.ingest.models import CandidateRecord, SourceRef
@@ -302,3 +304,21 @@ def test_cli_run_can_use_llm_command_extractor(tmp_path) -> None:
     assert pending[0]["title"] == "Use source refs"
     assert approved == []
     assert pending[0]["source_refs"][0]["segment_id"] == "file://README.md#simple-corpus"
+
+
+def test_cli_rejects_invalid_context_label(tmp_path) -> None:
+    output = tmp_path / "inventory.jsonl"
+
+    with pytest.raises(SystemExit) as excinfo:
+        main(
+            [
+                "inventory",
+                "tests/fixtures/ingestion/simple_docs",
+                "--context",
+                "bad key=openbsd",
+                "--output",
+                str(output),
+            ]
+        )
+
+    assert "invalid --context label" in str(excinfo.value)

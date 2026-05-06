@@ -139,17 +139,28 @@ def _parse_context_args(args: argparse.Namespace) -> dict[str, object]:
             raise SystemExit(f"--context must be KEY=VALUE, got {item!r}")
         key, value = item.split("=", 1)
         labels[key] = value
-    return context_to_mapping(
-        context_from_mapping(
-            {
-                "labels": labels,
-                "partition_keys": getattr(args, "partition_key", []) or [],
-                "soft_keys": getattr(args, "soft_key", []) or [],
-                "identity_keys": getattr(args, "identity_key", []) or [],
-                "collision_risk": getattr(args, "collision_risk", "normal"),
-            }
-        )
+    raw_context = {
+        "labels": labels,
+        "partition_keys": getattr(args, "partition_key", []) or [],
+        "soft_keys": getattr(args, "soft_key", []) or [],
+        "identity_keys": getattr(args, "identity_key", []) or [],
+        "collision_risk": getattr(args, "collision_risk", "normal"),
+    }
+    label_set = context_from_mapping(raw_context)
+    if labels and len(label_set.labels) != len(labels):
+        raise SystemExit("invalid --context label: keys and values must be non-empty safe atoms")
+    invalid_policy_keys = sorted(
+        set(raw_context["partition_keys"])
+        | set(raw_context["soft_keys"])
+        | set(raw_context["identity_keys"]) - set(label_set.labels)
     )
+    if labels and invalid_policy_keys:
+        raise SystemExit(
+            "invalid context policy key(s): "
+            + ", ".join(str(key) for key in invalid_policy_keys)
+            + " must match a --context key"
+        )
+    return context_to_mapping(label_set)
 
 
 def _cmd_inventory(args: argparse.Namespace) -> None:

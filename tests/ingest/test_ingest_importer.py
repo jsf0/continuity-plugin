@@ -136,3 +136,36 @@ def test_candidate_to_context_record_preserves_ingestion_context_labels() -> Non
         "identity_keys": ["command"],
         "collision_risk": "high",
     }
+
+
+def test_candidate_context_contributes_to_source_hash() -> None:
+    base = _candidate().to_dict()
+    openbsd = CandidateRecord.from_dict(
+        {
+            **base,
+            "ingestion": {
+                "context": {
+                    "labels": {"os": "openbsd"},
+                    "partition_keys": ["os"],
+                    "collision_risk": "high",
+                }
+            },
+        }
+    )
+    linux = CandidateRecord.from_dict(
+        {
+            **base,
+            "ingestion": {
+                "context": {
+                    "labels": {"os": "linux"},
+                    "partition_keys": ["os"],
+                    "collision_risk": "high",
+                }
+            },
+        }
+    )
+
+    assert (
+        candidate_to_context_record(openbsd).source_hash
+        != candidate_to_context_record(linux).source_hash
+    )
