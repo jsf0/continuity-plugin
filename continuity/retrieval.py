@@ -518,6 +518,7 @@ class ContinuityRetriever:
             selected,
             rejected,
             expanded_tokens=expanded_tokens,
+            query_tokens=tokens,
             query_facets=query_facets,
             personal_query=personal_query,
             include_stale=include_stale,
@@ -572,6 +573,7 @@ class ContinuityRetriever:
         rejected: list[CandidateScore],
         *,
         expanded_tokens: set[str],
+        query_tokens: set[str],
         query_facets: set[str],
         personal_query: bool,
         include_stale: bool,
@@ -605,7 +607,7 @@ class ContinuityRetriever:
             if _is_low_information_activation_query(expanded_tokens):
                 candidate.rejected_reason = "low_information_query_activation_seed"
                 continue
-            if not _has_strong_activation_anchor(candidate, expanded_tokens):
+            if not _has_strong_activation_anchor(candidate, expanded_tokens, query_tokens):
                 candidate.rejected_reason = "weak_anchor_activation_seed"
                 continue
             if _facets_incompatible(query_facets, _facets_for_record(candidate.record)):
@@ -869,9 +871,11 @@ def _direct_low_information_candidate_allowed(
     return bool(strong_tokens & (record_tags | record_entities | project_tokens))
 
 
-def _has_strong_activation_anchor(candidate: CandidateScore, tokens: set[str]) -> bool:
+def _has_strong_activation_anchor(
+    candidate: CandidateScore, expanded_tokens: set[str], query_tokens: set[str]
+) -> bool:
     """Require non-generic query anchors before a rejected candidate seeds graph spread."""
-    strong_tokens = tokens - WEAK_ANCHOR_TOKENS
+    strong_tokens = _activation_anchor_tokens(expanded_tokens, query_tokens)
     if not strong_tokens:
         return False
     record = candidate.record
@@ -887,6 +891,32 @@ def _has_strong_activation_anchor(candidate: CandidateScore, tokens: set[str]) -
         # unrelated mirrored hardware/project memories.
         return False
     return bool(candidate.text_score > 0 and strong_tokens & _record_text_tokens(record))
+
+
+def _activation_anchor_tokens(expanded_tokens: set[str], query_tokens: set[str]) -> set[str]:
+    """Return the query anchors allowed to start graph spreading.
+
+    Dynamic expansion may add memory-system terms from loosely related rejected
+    records.  If the user's original query contains a more specific non-memory
+    topic (for example a roadmap/corpus term), require activation-only seeds to
+    match that topic instead of generic continuity/retrieval terms.
+    """
+
+    query_strong = query_tokens - WEAK_ANCHOR_TOKENS
+    topic_tokens = (
+        query_strong
+        - MEMORY_META_INTENT_TOKENS
+        - {
+            "memory",
+            "provider",
+            "record",
+            "prefetch",
+            "continuity",
+        }
+    )
+    if topic_tokens:
+        return topic_tokens
+    return expanded_tokens - WEAK_ANCHOR_TOKENS
 
 
 def _is_preference_query(tokens: set[str], *, personal_query: bool) -> bool:

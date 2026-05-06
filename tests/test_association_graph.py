@@ -17,6 +17,20 @@ class RejectingReranker:
         return [RerankHit(record_id=record.id, score=0.01) for record in records]
 
 
+class ScoreByIdReranker:
+    def __init__(self, scores):
+        self.scores = scores
+
+    def is_available(self):
+        return True
+
+    def rerank(self, query, records):
+        return [
+            RerankHit(record_id=record.id, score=self.scores.get(record.id, 0.01))
+            for record in records
+        ]
+
+
 def _record(
     record_id,
     summary,
@@ -140,6 +154,74 @@ def test_graph_spreading_adds_associative_neighbor_from_activation_only_seed(tmp
     assert truck_candidate.activation >= 0.3
     assert debug["activation_trace"]["activation_seeds"][0]["record_id"] == "boat_context"
     assert debug["activation_trace"]["included_neighbors"][0]["record_id"] == "truck_context"
+
+
+def test_memory_roadmap_query_does_not_activate_unrelated_retrieval_graph(tmp_path):
+    store = ContinuityStore(tmp_path / "continuity.db")
+    store.migrate()
+    corpus_design = _record(
+        "corpus_design",
+        "Continuity corpus ingestion roadmap uses SourceDocument to CandidateRecord review flow.",
+        title="Corpus ingestion design roadmap",
+        tags=["corpus-ingestion", "roadmap"],
+        entities=["SourceDocument", "CandidateRecord"],
+        kind="project_convention",
+        scope_project="hermes-continuity-memory",
+    )
+    corpus_reminder = _record(
+        "corpus_reminder",
+        "Come back to continuity corpus ingestion work after stale cleanup and quality audit.",
+        title="Corpus ingestion reminder",
+        tags=["corpus-ingestion", "roadmap"],
+        entities=["continuity ingestion"],
+        kind="environment_fact",
+        scope_project="hermes-continuity-memory",
+    )
+    retrieval_status = _record(
+        "retrieval_status",
+        "Continuity retrieval facet compatibility fixes changed association graph behavior.",
+        title="Continuity retrieval fixes",
+        tags=["continuity", "retrieval", "association-graph"],
+        entities=["continuity plugin", "association graph"],
+        kind="active_project_state",
+        scope_project="hermes-continuity-memory",
+    )
+    boat_noise = _record(
+        "boat_noise",
+        "Boat towing regression used association graph rescue for Raptor context.",
+        title="Continuity retrieval boat/towing regression result",
+        tags=["continuity", "retrieval", "association-graph", "boat"],
+        entities=["boat towing", "association graph"],
+        kind="lesson_learned",
+        scope_project="hermes-continuity-memory",
+    )
+    for record in [corpus_design, corpus_reminder, retrieval_status, boat_noise]:
+        store.upsert_record(record, create_associations=False)
+    store.upsert_association_edge(
+        "retrieval_status",
+        "boat_noise",
+        strength=0.95,
+        edge_type="entity_overlap",
+    )
+
+    debug = ContinuityRetriever(
+        store,
+        reranker_backend=ScoreByIdReranker({"corpus_design": 0.99, "corpus_reminder": 0.98}),
+        reranker_min_score=0.15,
+        association_enabled=True,
+        association_activation_threshold=0.3,
+        association_hop_decay=0.6,
+        association_max_hops=2,
+    ).debug_search("corpus ingestion roadmap continuity memory", limit=5)
+
+    selected_ids = [candidate.record.id for candidate in debug["selected"]]
+    assert selected_ids[:2] == ["corpus_design", "corpus_reminder"]
+    assert "retrieval_status" not in selected_ids
+    assert "boat_noise" not in selected_ids
+    activation_seed_ids = {
+        seed["record_id"] for seed in debug["activation_trace"]["activation_seeds"]
+    }
+    assert "retrieval_status" not in activation_seed_ids
 
 
 def test_graph_spreading_respects_activation_threshold(tmp_path):
