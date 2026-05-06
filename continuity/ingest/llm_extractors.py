@@ -158,6 +158,17 @@ Allowed kinds:
 Return strict JSON only, either a list of objects or {{"candidates": [...]}}.
 Each object must contain: kind, title, summary.
 Optional fields: details, tags, entities, confidence, importance.
+
+Quality rules:
+- Prefer one compact candidate per distinct durable fact.
+- Do not create candidates that merely say a section/procedure/document exists.
+  Bad: {{"kind":"procedure_candidate","title":"Harvest Day","summary":"A procedure named Harvest Day exists."}}
+  Good: {{"kind":"procedure_candidate","title":"Harvest day checklist","summary":"Harvest day requires checking weather, testing the scale, assigning a recorder, inspecting fruit, and reviewing the log before publishing."}}
+- Do not use generic titles like "Overview", "Notes", "Public logs", or "Data handling" unless defining that exact glossary term.
+- Do not emit both a glossary_term and project_convention for the same statement unless they capture meaningfully different facts.
+- Do not summarize a heading when the body contains no durable, actionable, reusable, or definitional content.
+- Avoid title-only summaries, vague existence claims, and summaries shorter than a useful sentence.
+
 Do not include source_refs; the ingestion pipeline will attach this verified source_ref:
 {json.dumps(source_ref, sort_keys=True, ensure_ascii=False)}
 

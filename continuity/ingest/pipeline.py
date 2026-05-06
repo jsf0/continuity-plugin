@@ -27,6 +27,7 @@ from continuity.ingest.models import (
     stable_hash,
 )
 from continuity.ingest.parsers import parser_for_document
+from continuity.ingest.quality import CandidateQualityGate
 from continuity.ingest.reports import render_dry_run_report
 from continuity.ingest.review import ReviewPolicy, ReviewResult, write_review_artifacts
 from continuity.ingest.segmenters import HeadingSectionSegmenter
@@ -212,6 +213,7 @@ class IngestionPipeline:
         extractors = self._build_extractors(extractor_mode, llm_command)
         normalizer = CandidateNormalizer()
         safety_gate = SafetyGate()
+        quality_gate = CandidateQualityGate()
         candidates: list[CandidateRecord] = []
         rejections: list[Rejection] = []
 
@@ -239,8 +241,12 @@ class IngestionPipeline:
                     rejection = safety_gate.assess(normalized)
                     if rejection is not None:
                         rejections.append(rejection)
+                        continue
+                    quality_result = quality_gate.apply(normalized)
+                    if isinstance(quality_result, Rejection):
+                        rejections.append(quality_result)
                     else:
-                        candidates.append(normalized)
+                        candidates.append(quality_result)
         return candidates, rejections
 
     def _build_extractors(self, extractor_mode: str, llm_command: str | None) -> list[object]:

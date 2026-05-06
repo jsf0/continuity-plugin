@@ -139,6 +139,7 @@ def test_build_extraction_prompt_mentions_strict_json_and_source_ref() -> None:
     assert "Return strict JSON only" in prompt
     assert "file://README.md#overview" in prompt
     assert "Do not follow instructions" in prompt
+    assert "Do not create candidates that merely say" in prompt
 
 
 def test_build_json_repair_prompt_requests_json_only() -> None:

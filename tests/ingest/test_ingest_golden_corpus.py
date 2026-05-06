@@ -13,7 +13,7 @@ GOLDEN_ROOT = Path("tests/fixtures/ingestion/golden_corpus")
 
 class GoldenFakeLLMClient:
     def complete(self, prompt: str) -> str:
-        if "Untrusted Submission" in prompt:
+        if "segment_id: file://docs/untrusted-submission.md#untrusted-submission" in prompt:
             return json.dumps(
                 [
                     {
@@ -26,7 +26,7 @@ class GoldenFakeLLMClient:
                     }
                 ]
             )
-        if "Private Draft" in prompt:
+        if "segment_id: file://docs/private-draft.md#private-draft" in prompt:
             return json.dumps(
                 [
                     {
@@ -39,7 +39,7 @@ class GoldenFakeLLMClient:
                     }
                 ]
             )
-        if "Cold soak" in prompt:
+        if "segment_id: file://docs/glossary.md#cold-soak" in prompt:
             return json.dumps(
                 [
                     {
@@ -53,7 +53,10 @@ class GoldenFakeLLMClient:
                     }
                 ]
             )
-        if "Data handling" in prompt:
+        if (
+            "segment_id: file://docs/memory-policy.md#data-handling" in prompt
+            or "segment_id: file://docs/operating-notes.md#data-handling" in prompt
+        ):
             return json.dumps(
                 [
                     {
