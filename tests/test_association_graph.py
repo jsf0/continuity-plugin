@@ -222,6 +222,17 @@ def test_memory_roadmap_query_does_not_activate_unrelated_retrieval_graph(tmp_pa
         seed["record_id"] for seed in debug["activation_trace"]["activation_seeds"]
     }
     assert "retrieval_status" not in activation_seed_ids
+    expansion_terms = {term["term"] for term in debug["dynamic_expansion"]}
+    assert "boat" not in expansion_terms
+    assert "boat towing" not in expansion_terms
+    assert "continuity plugin" not in expansion_terms
+
+    no_reranker_debug = ContinuityRetriever(store, association_enabled=True).debug_search(
+        "corpus ingestion roadmap continuity memory", limit=5
+    )
+    no_reranker_ids = [candidate.record.id for candidate in no_reranker_debug["selected"]]
+    assert no_reranker_ids[:2] == ["corpus_design", "corpus_reminder"]
+    assert "retrieval_status" not in no_reranker_ids
 
 
 def test_graph_spreading_respects_activation_threshold(tmp_path):

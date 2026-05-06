@@ -417,6 +417,7 @@ class ContinuityRetriever:
                 and not _memory_system_record_without_meta_query(
                     candidate.record, query_facets, _facets_for_record(candidate.record)
                 )
+                and _candidate_matches_expansion_topic(candidate, expanded_tokens, tokens)
             ]
             dynamic_expansion = propose_expansion_terms(
                 expanded_tokens,
@@ -469,6 +470,12 @@ class ContinuityRetriever:
                 candidate.record, expanded_tokens, effective_scope
             ):
                 candidate.rejected_reason = "memory_meta_without_domain_anchor"
+                rejected.append(candidate)
+                continue
+            if memory_meta_query and not _candidate_matches_expansion_topic(
+                candidate, expanded_tokens, tokens
+            ):
+                candidate.rejected_reason = "memory_meta_topic_mismatch"
                 rejected.append(candidate)
                 continue
             record_facets = _facets_for_record(candidate.record)
@@ -871,6 +878,15 @@ def _direct_low_information_candidate_allowed(
     return bool(strong_tokens & (record_tags | record_entities | project_tokens))
 
 
+def _candidate_matches_expansion_topic(
+    candidate: CandidateScore, expanded_tokens: set[str], query_tokens: set[str]
+) -> bool:
+    topic_tokens = _activation_anchor_tokens(expanded_tokens, query_tokens)
+    if not topic_tokens:
+        return True
+    return bool(topic_tokens & _record_anchor_tokens(candidate.record))
+
+
 def _has_strong_activation_anchor(
     candidate: CandidateScore, expanded_tokens: set[str], query_tokens: set[str]
 ) -> bool:
@@ -906,12 +922,16 @@ def _activation_anchor_tokens(expanded_tokens: set[str], query_tokens: set[str])
     topic_tokens = (
         query_strong
         - MEMORY_META_INTENT_TOKENS
+        - MEMORY_META_ACTION_TOKENS
         - {
             "memory",
             "provider",
             "record",
             "prefetch",
             "continuity",
+            "issue",
+            "link",
+            "remaining",
         }
     )
     if topic_tokens:
