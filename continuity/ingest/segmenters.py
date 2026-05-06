@@ -14,6 +14,7 @@ from continuity.ingest.models import (
 )
 
 _SLUG_RE = re.compile(r"[^a-z0-9]+")
+_SKIP_MANPAGE_SECTIONS = {"HISTORY", "AUTHORS", "SEE ALSO", "STANDARDS"}
 
 
 class HeadingSectionSegmenter:
@@ -55,6 +56,55 @@ class HeadingSectionSegmenter:
                     metadata={
                         "heading_path": heading_path,
                         "content_hash": stable_hash(segment_text),
+                    },
+                    scope_project=document.scope_project,
+                    scope_repo=document.scope_repo,
+                    scope_user=document.scope_user,
+                    scope_profile=document.scope_profile,
+                )
+            )
+        return segments
+
+
+class ManPageSectionSegmenter:
+    """Group parsed manual pages into conventional manual sections."""
+
+    name = "manpage-section"
+
+    def segment(self, parsed: ParsedDocument, document: SourceDocument) -> list[SourceSegment]:
+        heading_indexes = [
+            index for index, block in enumerate(parsed.blocks) if block.kind == "heading"
+        ]
+        if not heading_indexes:
+            return [_whole_document_segment(parsed, document)] if parsed.blocks else []
+
+        manpage_name = _manpage_name(document)
+        segments: list[SourceSegment] = []
+        for position, block_index in enumerate(heading_indexes):
+            heading = parsed.blocks[block_index]
+            next_heading_index = (
+                heading_indexes[position + 1]
+                if position + 1 < len(heading_indexes)
+                else len(parsed.blocks)
+            )
+            section_blocks = parsed.blocks[block_index:next_heading_index]
+            segment_text = _blocks_to_text(section_blocks)
+            location = _combined_location(section_blocks, document)
+            section_name = heading.text
+            if section_name in _SKIP_MANPAGE_SECTIONS:
+                continue
+            segments.append(
+                SourceSegment(
+                    segment_id=f"{document.source_id}#{_slugify(section_name)}",
+                    source_id=document.source_id,
+                    kind="manpage_section",
+                    title=section_name,
+                    text=segment_text,
+                    location=location,
+                    metadata={
+                        "content_hash": stable_hash(segment_text),
+                        "manpage_name": manpage_name,
+                        "manpage_section": section_name,
                     },
                     scope_project=document.scope_project,
                     scope_repo=document.scope_repo,
@@ -149,3 +199,8 @@ def _combined_location(
 def _slugify(text: str) -> str:
     slug = _SLUG_RE.sub("-", text.lower()).strip("-")
     return slug or "section"
+
+
+def _manpage_name(document: SourceDocument) -> str:
+    title = document.title or document.source_id.rsplit("/", 1)[-1]
+    return re.sub(r"\.\d+(?:\.txt)?$", "", title)

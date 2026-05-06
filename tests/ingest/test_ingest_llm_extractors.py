@@ -142,6 +142,34 @@ def test_build_extraction_prompt_mentions_strict_json_and_source_ref() -> None:
     assert "Do not create candidates that merely say" in prompt
 
 
+def test_build_extraction_prompt_for_manpage_requests_operational_records() -> None:
+    segment = SourceSegment(
+        segment_id="file://rcctl.8.txt#synopsis",
+        source_id="file://rcctl.8.txt",
+        kind="manpage_section",
+        title="SYNOPSIS",
+        text="SYNOPSIS\nrcctl enable daemon\nrcctl start daemon",
+        location=SourceLocation(
+            uri="file://rcctl.8.txt", path="rcctl.8.txt", line_start=4, line_end=6
+        ),
+        metadata={"content_hash": "abc", "manpage_name": "rcctl"},
+    )
+    document = SourceDocument(
+        source_id="file://rcctl.8.txt",
+        source_type="text",
+        uri="file://rcctl.8.txt",
+        title="rcctl.8.txt",
+        metadata={"path": "rcctl.8.txt", "relative_path": "rcctl.8.txt"},
+    )
+
+    prompt = build_extraction_prompt(segment, document, recipe="manpage")
+
+    assert "manual page" in prompt
+    assert "OpenBSD services are managed with rcctl" in prompt
+    assert "Prefer 1-5 high-signal records" in prompt
+    assert "manual page named" in prompt
+
+
 def test_build_json_repair_prompt_requests_json_only() -> None:
     prompt = build_json_repair_prompt("not-json", error="bad parse")
 
@@ -184,3 +212,56 @@ def test_pipeline_can_use_injected_llm_extractor(tmp_path) -> None:
     assert result.manifest.candidate_count == 1
     assert candidates[0]["ingestion"]["extractor"] == "llm-candidate-extractor"
     assert approved[0]["title"] == "Source refs are mandatory"
+
+
+def test_pipeline_llm_resume_reuses_completed_segment_results(tmp_path) -> None:
+    path = tmp_path / "rcctl.8.txt"
+    path.write_text(
+        "NAME\nrcctl - control OpenBSD daemons\n"
+        "SYNOPSIS\nrcctl enable daemon\nrcctl start daemon\n",
+        encoding="utf-8",
+    )
+    response = json.dumps(
+        [
+            {
+                "kind": "procedure_candidate",
+                "title": "OpenBSD service management with rcctl",
+                "summary": "OpenBSD daemons can be enabled and started with rcctl enable and rcctl start.",
+                "tags": ["openbsd", "rcctl", "services"],
+                "confidence": 0.86,
+                "importance": 0.78,
+            }
+        ]
+    )
+    first_client = FakeLLMClient(response)
+    output_dir = tmp_path / "run-resume"
+
+    first = IngestionPipeline(llm_client=first_client).run_dry_inventory_and_segment(
+        roots=[tmp_path],
+        output_dir=output_dir,
+        recipe="manpage",
+        run_id="run-resume",
+        created_at="2026-05-05T20:00:00Z",
+        include=["rcctl.8.txt"],
+        extractor_mode="llm",
+        review_policy="require-review",
+    )
+
+    second_client = FakeLLMClient("[]")
+    second = IngestionPipeline(llm_client=second_client).run_dry_inventory_and_segment(
+        roots=[tmp_path],
+        output_dir=output_dir,
+        recipe="manpage",
+        run_id="run-resume",
+        created_at="2026-05-05T20:00:00Z",
+        include=["rcctl.8.txt"],
+        extractor_mode="llm",
+        review_policy="require-review",
+        resume=True,
+    )
+
+    assert first.manifest.candidate_count == 2
+    assert second.manifest.candidate_count == 2
+    assert second_client.prompts == []
+    assert (output_dir / "llm-segment-results").is_dir()
+    assert len(read_jsonl(output_dir / "segments.done.jsonl")) == 2

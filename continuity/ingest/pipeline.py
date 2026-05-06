@@ -17,7 +17,12 @@ from continuity.ingest.extractors import (
     ProjectCapsuleExtractor,
 )
 from continuity.ingest.jsonl import write_jsonl
-from continuity.ingest.llm_extractors import CommandLLMClient, LLMCandidateExtractor, LLMClient
+from continuity.ingest.llm_extractors import (
+    CommandLLMClient,
+    LLMCandidateExtractor,
+    LLMClient,
+    LLMExtractionResult,
+)
 from continuity.ingest.models import (
     CandidateRecord,
     IngestionRunManifest,
@@ -30,7 +35,7 @@ from continuity.ingest.parsers import parser_for_document
 from continuity.ingest.quality import CandidateQualityGate
 from continuity.ingest.reports import render_dry_run_report
 from continuity.ingest.review import ReviewPolicy, ReviewResult, write_review_artifacts
-from continuity.ingest.segmenters import HeadingSectionSegmenter
+from continuity.ingest.segmenters import HeadingSectionSegmenter, ManPageSectionSegmenter
 from continuity.ingest.validation import CandidateNormalizer, SafetyGate
 
 _PARSEABLE_SOURCE_TYPES = {"markdown", "rst", "text"}
@@ -79,6 +84,7 @@ class IngestionPipeline:
         review_policy: str = "conservative",
         extractor_mode: str = "deterministic",
         llm_command: str | None = None,
+        resume: bool = False,
     ) -> PipelineResult:
         """Run a dry corpus ingestion pipeline and write review-first artifacts.
 
@@ -114,12 +120,15 @@ class IngestionPipeline:
             repo=repo,
             collection=collection,
         )
-        segments = self._segment_documents(documents)
+        segments = self._segment_documents(documents, recipe=recipe)
         candidates, rejections = self._extract_and_validate(
             documents,
             segments,
             extractor_mode=extractor_mode,
             llm_command=llm_command,
+            recipe=recipe,
+            output_path=output_path,
+            resume=resume,
         )
         dedupe_result = BasicDeduper().dedupe(candidates)
         all_rejections = [*rejections, *dedupe_result.rejections]
@@ -193,11 +202,15 @@ class IngestionPipeline:
             )
         return documents
 
-    def _segment_documents(self, documents: list[SourceDocument]) -> list[SourceSegment]:
+    def _segment_documents(
+        self, documents: list[SourceDocument], *, recipe: str
+    ) -> list[SourceSegment]:
         segments: list[SourceSegment] = []
-        segmenter = HeadingSectionSegmenter()
+        segmenter = (
+            ManPageSectionSegmenter() if _is_manpage_recipe(recipe) else HeadingSectionSegmenter()
+        )
         for document in documents:
-            parsed = parser_for_document(document).parse(document)
+            parsed = parser_for_document(document, recipe=recipe).parse(document)
             segments.extend(segmenter.segment(parsed, document))
         return segments
 
@@ -208,9 +221,12 @@ class IngestionPipeline:
         *,
         extractor_mode: str,
         llm_command: str | None,
+        recipe: str,
+        output_path: Path,
+        resume: bool,
     ) -> tuple[list[CandidateRecord], list[Rejection]]:
         document_by_id = {document.source_id: document for document in documents}
-        extractors = self._build_extractors(extractor_mode, llm_command)
+        extractors = self._build_extractors(extractor_mode, llm_command, recipe=recipe)
         normalizer = CandidateNormalizer()
         safety_gate = SafetyGate()
         quality_gate = CandidateQualityGate()
@@ -231,7 +247,14 @@ class IngestionPipeline:
             for extractor in extractors:
                 raw_candidates: list[CandidateRecord]
                 if isinstance(extractor, LLMCandidateExtractor):
-                    llm_result = extractor.extract_with_rejections(segment, document)
+                    llm_result = self._extract_llm_segment(
+                        extractor,
+                        segment,
+                        document,
+                        output_path=output_path,
+                        recipe=recipe,
+                        resume=resume,
+                    )
                     raw_candidates = llm_result.candidates
                     rejections.extend(llm_result.rejections)
                 else:
@@ -247,9 +270,31 @@ class IngestionPipeline:
                         rejections.append(quality_result)
                     else:
                         candidates.append(quality_result)
+        if any(isinstance(extractor, LLMCandidateExtractor) for extractor in extractors):
+            _write_llm_progress(output_path, segments, recipe)
         return candidates, rejections
 
-    def _build_extractors(self, extractor_mode: str, llm_command: str | None) -> list[object]:
+    def _extract_llm_segment(
+        self,
+        extractor: LLMCandidateExtractor,
+        segment: SourceSegment,
+        document: SourceDocument,
+        *,
+        output_path: Path,
+        recipe: str,
+        resume: bool,
+    ) -> LLMExtractionResult:
+        cache_path = _llm_segment_result_path(output_path, segment, recipe)
+        if resume and cache_path.exists():
+            return _read_llm_segment_result(cache_path)
+
+        result = extractor.extract_with_rejections(segment, document)
+        _write_llm_segment_result(cache_path, result)
+        return result
+
+    def _build_extractors(
+        self, extractor_mode: str, llm_command: str | None, *, recipe: str
+    ) -> list[object]:
         if extractor_mode == "deterministic":
             return [
                 ProjectCapsuleExtractor(),
@@ -260,7 +305,7 @@ class IngestionPipeline:
             client = self.llm_client or (CommandLLMClient(llm_command) if llm_command else None)
             if client is None:
                 raise ValueError("llm extractor requires an injected client or --llm-command")
-            return [LLMCandidateExtractor(client)]
+            return [LLMCandidateExtractor(client, recipe=recipe)]
         if extractor_mode == "deterministic,llm":
             client = self.llm_client or (CommandLLMClient(llm_command) if llm_command else None)
             if client is None:
@@ -271,7 +316,7 @@ class IngestionPipeline:
                 ProjectCapsuleExtractor(),
                 ProcedureCandidateExtractor(),
                 CodeOrConfigFactExtractor(),
-                LLMCandidateExtractor(client),
+                LLMCandidateExtractor(client, recipe=recipe),
             ]
         raise ValueError("unknown extractor mode")
 
@@ -291,6 +336,7 @@ def run_dry_inventory_and_segment(
     review_policy: str = "conservative",
     extractor_mode: str = "deterministic",
     llm_command: str | None = None,
+    resume: bool = False,
 ) -> PipelineResult:
     """Convenience wrapper for the default ingestion pipeline."""
 
@@ -308,6 +354,7 @@ def run_dry_inventory_and_segment(
         review_policy=review_policy,
         extractor_mode=extractor_mode,
         llm_command=llm_command,
+        resume=resume,
     )
 
 
@@ -317,6 +364,58 @@ def _write_manifest(path: Path, manifest: IngestionRunManifest) -> None:
         json.dumps(manifest.to_dict(), sort_keys=True, indent=2, ensure_ascii=False) + "\n",
         encoding="utf-8",
     )
+
+
+def _llm_segment_result_path(output_path: Path, segment: SourceSegment, recipe: str) -> Path:
+    cache_key = stable_hash(
+        {
+            "recipe": recipe,
+            "segment_id": segment.segment_id,
+            "content_hash": segment.metadata.get("content_hash"),
+        }
+    )
+    return output_path / "llm-segment-results" / f"{cache_key}.json"
+
+
+def _write_llm_segment_result(path: Path, result: LLMExtractionResult) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "candidates": [candidate.to_dict() for candidate in result.candidates],
+        "rejections": [rejection.to_dict() for rejection in result.rejections],
+    }
+    path.write_text(
+        json.dumps(payload, sort_keys=True, ensure_ascii=False) + "\n", encoding="utf-8"
+    )
+
+
+def _read_llm_segment_result(path: Path) -> LLMExtractionResult:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    return LLMExtractionResult(
+        candidates=[CandidateRecord.from_dict(row) for row in payload.get("candidates", [])],
+        rejections=[Rejection.from_dict(row) for row in payload.get("rejections", [])],
+    )
+
+
+def _write_llm_progress(output_path: Path, segments: list[SourceSegment], recipe: str) -> None:
+    done: list[dict[str, object]] = []
+    todo: list[dict[str, object]] = []
+    for segment in segments:
+        row = {
+            "segment_id": segment.segment_id,
+            "source_id": segment.source_id,
+            "title": segment.title,
+            "content_hash": segment.metadata.get("content_hash"),
+        }
+        if _llm_segment_result_path(output_path, segment, recipe).exists():
+            done.append(row)
+        else:
+            todo.append(row)
+    write_jsonl(output_path / "segments.done.jsonl", done)
+    write_jsonl(output_path / "segments.todo.jsonl", todo)
+
+
+def _is_manpage_recipe(recipe: str) -> bool:
+    return recipe in {"manpage", "openbsd-manpages"}
 
 
 def _utc_now() -> str:

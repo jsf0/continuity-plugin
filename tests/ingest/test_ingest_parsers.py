@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from continuity.ingest.models import SourceDocument
-from continuity.ingest.parsers import MarkdownParser, TextParser, parser_for_document
+from continuity.ingest.parsers import ManPageParser, MarkdownParser, TextParser, parser_for_document
 
 FIXTURE_ROOT = Path("tests/fixtures/ingestion/simple_docs")
 
@@ -98,6 +98,40 @@ def test_text_parser_emits_line_and_blank_blocks(tmp_path) -> None:
     assert parsed.blocks[2].location.line_start == 3
 
 
+def test_man_page_parser_recognizes_uppercase_sections(tmp_path) -> None:
+    path = tmp_path / "rcctl.8.txt"
+    path.write_text(
+        "RCCTL(8) OpenBSD System Manager's Manual\n"
+        "NAME\n"
+        "rcctl - control OpenBSD daemons\n"
+        "SYNOPSIS\n"
+        "rcctl enable daemon\n"
+        "DESCRIPTION\n"
+        "The rcctl utility controls OpenBSD services.\n",
+        encoding="utf-8",
+    )
+    document = SourceDocument(
+        source_id="file://rcctl.8.txt",
+        source_type="text",
+        uri="file://rcctl.8.txt",
+        title="rcctl.8.txt",
+        metadata={"path": str(path), "relative_path": "rcctl.8.txt"},
+    )
+
+    parsed = ManPageParser().parse(document)
+
+    headings = [block for block in parsed.blocks if block.kind == "heading"]
+    assert [heading.text for heading in headings] == ["NAME", "SYNOPSIS", "DESCRIPTION"]
+    assert headings[0].metadata["manpage_section"] == "NAME"
+    assert parsed.metadata["parser"] == "manpage"
+
+
 def test_parser_for_document_uses_source_type() -> None:
     assert isinstance(parser_for_document(_document("README.md", "markdown")), MarkdownParser)
     assert isinstance(parser_for_document(_document("notes.txt", "text")), TextParser)
+
+
+def test_parser_for_document_uses_manpage_recipe_for_text_documents() -> None:
+    assert isinstance(
+        parser_for_document(_document("notes.txt", "text"), recipe="manpage"), ManPageParser
+    )

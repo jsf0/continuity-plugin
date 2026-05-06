@@ -3,8 +3,12 @@ from __future__ import annotations
 from pathlib import Path
 
 from continuity.ingest.models import SourceDocument
-from continuity.ingest.parsers import MarkdownParser, TextParser
-from continuity.ingest.segmenters import FixedWindowSegmenter, HeadingSectionSegmenter
+from continuity.ingest.parsers import ManPageParser, MarkdownParser, TextParser
+from continuity.ingest.segmenters import (
+    FixedWindowSegmenter,
+    HeadingSectionSegmenter,
+    ManPageSectionSegmenter,
+)
 
 FIXTURE_ROOT = Path("tests/fixtures/ingestion/simple_docs")
 
@@ -66,6 +70,46 @@ def test_heading_section_segmenter_falls_back_to_whole_document_without_headings
     assert segments[0].location is not None
     assert segments[0].location.line_start == 1
     assert segments[0].location.line_end == 3
+
+
+def test_man_page_section_segmenter_groups_operational_sections(tmp_path) -> None:
+    path = tmp_path / "rcctl.8.txt"
+    path.write_text(
+        "RCCTL(8) OpenBSD System Manager's Manual\n"
+        "NAME\n"
+        "rcctl - control OpenBSD daemons\n"
+        "SYNOPSIS\n"
+        "rcctl enable daemon\n"
+        "rcctl start daemon\n"
+        "DESCRIPTION\n"
+        "The rcctl utility controls OpenBSD services.\n"
+        "FILES\n"
+        "/etc/rc.conf.local stores local daemon configuration.\n",
+        encoding="utf-8",
+    )
+    document = SourceDocument(
+        source_id="file://rcctl.8.txt",
+        source_type="text",
+        uri="file://rcctl.8.txt",
+        title="rcctl.8.txt",
+        metadata={"path": str(path), "relative_path": "rcctl.8.txt"},
+    )
+    parsed = ManPageParser().parse(document)
+
+    segments = ManPageSectionSegmenter().segment(parsed, document)
+
+    assert [segment.title for segment in segments] == [
+        "NAME",
+        "SYNOPSIS",
+        "DESCRIPTION",
+        "FILES",
+    ]
+    synopsis = segments[1]
+    assert synopsis.kind == "manpage_section"
+    assert synopsis.metadata["manpage_section"] == "SYNOPSIS"
+    assert synopsis.metadata["manpage_name"] == "rcctl"
+    assert synopsis.segment_id == "file://rcctl.8.txt#synopsis"
+    assert "rcctl enable daemon" in synopsis.text
 
 
 def test_fixed_window_segmenter_splits_blocks_into_line_bounded_windows(tmp_path) -> None:

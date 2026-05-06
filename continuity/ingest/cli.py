@@ -62,6 +62,7 @@ def _build_parser() -> argparse.ArgumentParser:
         default="deterministic",
     )
     run.add_argument("--llm-command")
+    run.add_argument("--resume", action="store_true")
     run.add_argument("--output", required=True)
     run.set_defaults(func=_cmd_run)
 
@@ -147,6 +148,7 @@ def _cmd_run(args: argparse.Namespace) -> None:
         review_policy=args.policy,
         extractor_mode=args.extractor,
         llm_command=args.llm_command,
+        resume=args.resume,
     )
 
 
