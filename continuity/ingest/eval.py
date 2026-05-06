@@ -75,6 +75,7 @@ class EvalCaseResult:
     forbidden_matches: list[str]
     selected_titles: list[str]
     selected_tags: list[str]
+    context_rejections: list[dict[str, str]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -89,6 +90,7 @@ class EvalCaseResult:
             "forbidden_matches": self.forbidden_matches,
             "selected_titles": self.selected_titles,
             "selected_tags": self.selected_tags,
+            "context_rejections": self.context_rejections,
         }
 
 
@@ -127,14 +129,14 @@ class EvalRunner:
         self.limit = limit
 
     def run_case(self, eval_case: EvalCase) -> EvalCaseResult:
-        hits = ContinuityRetriever(self.store).search(
+        debug = ContinuityRetriever(self.store).debug_search(
             eval_case.query,
             scope_project=eval_case.scope_project,
             limit=self.limit,
             query_context=eval_case.query_context or None,
             comparison_intent=eval_case.comparison_intent,
         )
-        records = [hit.record for hit in hits]
+        records = [candidate.record for candidate in debug["selected"]]
         selected_titles = [record.title for record in records]
         selected_tags = _unique_tags(records)
         matched_titles = [
@@ -177,6 +179,7 @@ class EvalRunner:
             forbidden_matches=forbidden_matches,
             selected_titles=selected_titles,
             selected_tags=selected_tags,
+            context_rejections=_context_rejections(debug["rejected"]),
         )
 
     def run_file(
@@ -195,6 +198,28 @@ class EvalRunner:
         if report_path is not None:
             write_jsonl(report_path, [result.to_dict() for result in case_results])
         return aggregate
+
+
+def _context_rejections(candidates: object) -> list[dict[str, str]]:
+    rows: list[dict[str, str]] = []
+    if not isinstance(candidates, list):
+        return rows
+    for candidate in candidates:
+        reason = str(getattr(candidate, "rejected_reason", "") or "")
+        if not (
+            reason.startswith("missing_partition_context:")
+            or reason.startswith("context_label_conflict:")
+        ):
+            continue
+        record = getattr(candidate, "record", None)
+        rows.append(
+            {
+                "record_id": str(getattr(record, "id", "")),
+                "title": str(getattr(record, "title", "")),
+                "reason": reason,
+            }
+        )
+    return rows
 
 
 def _unique_tags(records: list[object]) -> list[str]:

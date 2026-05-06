@@ -233,3 +233,67 @@ def test_context_eval_fails_without_required_query_context(tmp_path) -> None:
 
     assert result.passed is False
     assert result.missing_titles == [candidate.title]
+
+
+def test_context_eval_report_includes_withheld_context_reason(tmp_path) -> None:
+    store = ContinuityStore(tmp_path / "continuity.db")
+    candidate = CandidateRecord.from_dict(
+        {
+            **_candidate().to_dict(),
+            "ingestion": {
+                "context": {
+                    "labels": {"os": "openbsd"},
+                    "partition_keys": ["os"],
+                    "collision_risk": "high",
+                }
+            },
+        }
+    )
+    ContinuityImporter(store).import_records([candidate], dry_run=False)
+    eval_case = EvalCase(
+        eval_id="eval_context_reason",
+        query="What should I know about eval fixture?",
+        expected_record_titles=[candidate.title],
+        expected_tags=[],
+    )
+    result = EvalRunner(store).run_case(eval_case)
+
+    assert result.context_rejections
+    assert result.context_rejections[0]["title"] == candidate.title
+    assert result.context_rejections[0]["reason"] == "missing_partition_context:os"
+
+
+def test_eval_file_report_writes_context_rejections(tmp_path) -> None:
+    store = ContinuityStore(tmp_path / "continuity.db")
+    candidate = CandidateRecord.from_dict(
+        {
+            **_candidate().to_dict(),
+            "ingestion": {
+                "context": {
+                    "labels": {"os": "openbsd"},
+                    "partition_keys": ["os"],
+                    "collision_risk": "high",
+                }
+            },
+        }
+    )
+    ContinuityImporter(store).import_records([candidate], dry_run=False)
+    evals_path = tmp_path / "evals.jsonl"
+    report_path = tmp_path / "report.jsonl"
+    write_jsonl(
+        evals_path,
+        [
+            EvalCase(
+                eval_id="eval_context_report",
+                query="What should I know about eval fixture?",
+                expected_record_titles=[candidate.title],
+                expected_tags=[],
+            ).to_dict()
+        ],
+    )
+
+    result = EvalRunner(store).run_file(evals_path, report_path=report_path)
+
+    assert result.passed is False
+    report = read_jsonl(report_path)
+    assert report[0]["context_rejections"][0]["reason"] == "missing_partition_context:os"
