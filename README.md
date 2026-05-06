@@ -236,6 +236,7 @@ This is not comprehensive DLP or an access-control system. See [`docs/TROUBLESHO
 
 - [`docs/INSTALL.md`](docs/INSTALL.md) — install and verification.
 - [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md) — runtime configuration.
+- [`docs/CORPUS_INGESTION.md`](docs/CORPUS_INGESTION.md) — review-first corpus ingestion, temporary validation, and scale/debug stats.
 - [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md) — common issues and debugging.
 - [`docs/SPEC.md`](docs/SPEC.md) — phased technical spec.
 - [`docs/RELEASE.md`](docs/RELEASE.md) — release checklist.

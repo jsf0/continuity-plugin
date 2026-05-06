@@ -68,6 +68,7 @@ Confirm these are current:
 - `CHANGELOG.md`
 - `docs/INSTALL.md`
 - `docs/CONFIGURATION.md`
+- `docs/CORPUS_INGESTION.md`
 - `docs/TROUBLESHOOTING.md`
 - `docs/SPEC.md`
 - `CONTRIBUTING.md`

@@ -33,7 +33,7 @@ from continuity.ingest.models import (
 )
 from continuity.ingest.parsers import parser_for_document
 from continuity.ingest.quality import CandidateQualityGate
-from continuity.ingest.reports import render_dry_run_report
+from continuity.ingest.reports import build_ingestion_stats, render_dry_run_report
 from continuity.ingest.review import ReviewPolicy, ReviewResult, write_review_artifacts
 from continuity.ingest.segmenters import HeadingSectionSegmenter, ManPageSectionSegmenter
 from continuity.ingest.validation import CandidateNormalizer, SafetyGate
@@ -160,6 +160,19 @@ class IngestionPipeline:
         write_jsonl(output_path / "inventory.jsonl", [document.to_dict() for document in documents])
         write_jsonl(output_path / "segments.jsonl", [segment.to_dict() for segment in segments])
         write_jsonl(output_path / "retrieval-evals.jsonl", [case.to_dict() for case in eval_cases])
+        stats = build_ingestion_stats(
+            manifest=manifest,
+            documents=documents,
+            segments=segments,
+            candidates=candidates,
+            merged_candidates=dedupe_result.accepted,
+            rejections=all_rejections,
+            review_result=review_result,
+        )
+        (output_path / "ingestion-stats.json").write_text(
+            json.dumps(stats, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
         (output_path / "import-report.md").write_text(
             render_dry_run_report(manifest), encoding="utf-8"
         )
