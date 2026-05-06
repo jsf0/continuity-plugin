@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from collections import Counter
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from statistics import mean
 
+from continuity.context_labels import context_from_mapping
 from continuity.ingest.models import (
     CandidateRecord,
     IngestionRunManifest,
@@ -99,6 +100,7 @@ def build_ingestion_stats(
             "avg_confidence": _avg(candidate.confidence for candidate in candidates),
             "avg_importance": _avg(candidate.importance for candidate in candidates),
         },
+        "context": _context_stats(documents, segments, candidates),
         "review": {
             "approved_count": approved_count,
             "pending_count": pending_count,
@@ -112,7 +114,34 @@ def build_ingestion_stats(
     }
 
 
-def _count(values: object) -> dict[str, int]:
+def _context_stats(
+    documents: Sequence[SourceDocument],
+    segments: Sequence[SourceSegment],
+    candidates: Sequence[CandidateRecord],
+) -> dict[str, object]:
+    document_contexts = [context_from_mapping(document.metadata) for document in documents]
+    segment_contexts = [context_from_mapping(segment.metadata) for segment in segments]
+    candidate_contexts = [context_from_mapping(candidate.ingestion) for candidate in candidates]
+    return {
+        "documents_with_labels": sum(1 for context in document_contexts if context.labels),
+        "segments_with_labels": sum(1 for context in segment_contexts if context.labels),
+        "candidates_with_labels": sum(1 for context in candidate_contexts if context.labels),
+        "by_collision_risk": _count(
+            context.collision_risk for context in candidate_contexts if context.labels
+        ),
+        "by_partition_key": _count(
+            key for context in candidate_contexts for key in context.partition_keys
+        ),
+        "by_label_key": _count(key for context in candidate_contexts for key in context.labels),
+        "high_collision_without_partition": sum(
+            1
+            for context in candidate_contexts
+            if context.labels and context.collision_risk == "high" and not context.partition_keys
+        ),
+    }
+
+
+def _count(values: Iterable[object]) -> dict[str, int]:
     return dict(sorted(Counter(str(value) for value in values).items()))
 
 

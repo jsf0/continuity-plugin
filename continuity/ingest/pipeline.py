@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
 
+from continuity.context_labels import ContextLabelSet, context_from_mapping, context_to_mapping
 from continuity.ingest.connectors import LocalFilesConnector
 from continuity.ingest.dedupe import BasicDeduper
 from continuity.ingest.eval import EvalCase, generate_eval_case
@@ -85,6 +86,7 @@ class IngestionPipeline:
         extractor_mode: str = "deterministic",
         llm_command: str | None = None,
         resume: bool = False,
+        context: dict[str, object] | ContextLabelSet | None = None,
     ) -> PipelineResult:
         """Run a dry corpus ingestion pipeline and write review-first artifacts.
 
@@ -109,6 +111,7 @@ class IngestionPipeline:
                 "collection": collection,
                 "review_policy": review_policy,
                 "extractor_mode": extractor_mode,
+                "context": _normalize_context(context),
             }
         )
 
@@ -120,7 +123,9 @@ class IngestionPipeline:
             repo=repo,
             collection=collection,
         )
+        documents = _attach_context_to_documents(documents, context)
         segments = self._segment_documents(documents, recipe=recipe)
+        segments = _attach_context_to_segments(segments, context)
         candidates, rejections = self._extract_and_validate(
             documents,
             segments,
@@ -282,7 +287,7 @@ class IngestionPipeline:
                     if isinstance(quality_result, Rejection):
                         rejections.append(quality_result)
                     else:
-                        candidates.append(quality_result)
+                        candidates.append(_attach_context_to_candidate(quality_result, segment))
         if any(isinstance(extractor, LLMCandidateExtractor) for extractor in extractors):
             _write_llm_progress(output_path, segments, recipe)
         return candidates, rejections
@@ -334,6 +339,45 @@ class IngestionPipeline:
         raise ValueError("unknown extractor mode")
 
 
+def _normalize_context(context: dict[str, object] | ContextLabelSet | None) -> dict[str, object]:
+    label_set = context if isinstance(context, ContextLabelSet) else context_from_mapping(context)
+    mapping = context_to_mapping(label_set)
+    return mapping if mapping["labels"] else {}
+
+
+def _attach_context_to_documents(
+    documents: list[SourceDocument], context: dict[str, object] | ContextLabelSet | None
+) -> list[SourceDocument]:
+    context_payload = _normalize_context(context)
+    if not context_payload:
+        return documents
+    return [
+        replace(document, metadata={**document.metadata, "context": context_payload})
+        for document in documents
+    ]
+
+
+def _attach_context_to_segments(
+    segments: list[SourceSegment], context: dict[str, object] | ContextLabelSet | None
+) -> list[SourceSegment]:
+    context_payload = _normalize_context(context)
+    if not context_payload:
+        return segments
+    return [
+        replace(segment, metadata={**segment.metadata, "context": context_payload})
+        for segment in segments
+    ]
+
+
+def _attach_context_to_candidate(
+    candidate: CandidateRecord, segment: SourceSegment
+) -> CandidateRecord:
+    context_payload = _normalize_context(segment.metadata)
+    if not context_payload:
+        return candidate
+    return replace(candidate, ingestion={**candidate.ingestion, "context": context_payload})
+
+
 def run_dry_inventory_and_segment(
     *,
     roots: Iterable[str | Path],
@@ -350,6 +394,7 @@ def run_dry_inventory_and_segment(
     extractor_mode: str = "deterministic",
     llm_command: str | None = None,
     resume: bool = False,
+    context: dict[str, object] | ContextLabelSet | None = None,
 ) -> PipelineResult:
     """Convenience wrapper for the default ingestion pipeline."""
 
@@ -368,6 +413,7 @@ def run_dry_inventory_and_segment(
         extractor_mode=extractor_mode,
         llm_command=llm_command,
         resume=resume,
+        context=context,
     )
 
 

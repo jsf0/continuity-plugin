@@ -109,3 +109,30 @@ def test_importer_is_idempotent_and_updates_existing_record(tmp_path) -> None:
     record = store.get_record(first.created[0])
     assert record is not None
     assert record.summary == "Updated pytest command summary."
+
+
+def test_candidate_to_context_record_preserves_ingestion_context_labels() -> None:
+    candidate = CandidateRecord.from_dict(
+        {
+            **_candidate().to_dict(),
+            "ingestion": {
+                "extractor": "code-or-config-fact",
+                "context": {
+                    "labels": {"os": "OpenBSD", "command": "ifconfig"},
+                    "partition_keys": ["os"],
+                    "identity_keys": ["command"],
+                    "collision_risk": "high",
+                },
+            },
+        }
+    )
+
+    record = candidate_to_context_record(candidate)
+
+    assert record.quality["context"] == {
+        "labels": {"command": "ifconfig", "os": "openbsd"},
+        "partition_keys": ["os"],
+        "soft_keys": [],
+        "identity_keys": ["command"],
+        "collision_risk": "high",
+    }

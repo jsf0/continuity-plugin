@@ -8,6 +8,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+from continuity.context_labels import context_from_mapping, context_to_mapping
 from continuity.ingest.eval import EvalRunner
 from continuity.ingest.importer import ContinuityImporter
 from continuity.ingest.jsonl import read_jsonl, write_jsonl
@@ -36,6 +37,7 @@ def _build_parser() -> argparse.ArgumentParser:
     inventory = subcommands.add_parser("inventory", help="Discover local source documents")
     inventory.add_argument("path")
     _add_include_exclude(inventory)
+    _add_context_args(inventory)
     inventory.add_argument("--project")
     inventory.add_argument("--repo")
     inventory.add_argument("--collection")
@@ -53,6 +55,7 @@ def _build_parser() -> argparse.ArgumentParser:
     run.add_argument("--run-id")
     run.add_argument("--created-at")
     _add_include_exclude(run)
+    _add_context_args(run)
     run.add_argument("--project")
     run.add_argument("--repo")
     run.add_argument("--collection")
@@ -104,6 +107,7 @@ def _build_parser() -> argparse.ArgumentParser:
     refresh.add_argument("path")
     refresh.add_argument("--previous-inventory", required=True)
     _add_include_exclude(refresh)
+    _add_context_args(refresh)
     refresh.add_argument("--project")
     refresh.add_argument("--repo")
     refresh.add_argument("--collection")
@@ -120,6 +124,34 @@ def _add_include_exclude(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--exclude", action="append")
 
 
+def _add_context_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--context", action="append", default=[], metavar="KEY=VALUE")
+    parser.add_argument("--partition-key", action="append", default=[])
+    parser.add_argument("--soft-key", action="append", default=[])
+    parser.add_argument("--identity-key", action="append", default=[])
+    parser.add_argument("--collision-risk", choices=["normal", "high"], default="normal")
+
+
+def _parse_context_args(args: argparse.Namespace) -> dict[str, object]:
+    labels: dict[str, str] = {}
+    for item in getattr(args, "context", []) or []:
+        if "=" not in item:
+            raise SystemExit(f"--context must be KEY=VALUE, got {item!r}")
+        key, value = item.split("=", 1)
+        labels[key] = value
+    return context_to_mapping(
+        context_from_mapping(
+            {
+                "labels": labels,
+                "partition_keys": getattr(args, "partition_key", []) or [],
+                "soft_keys": getattr(args, "soft_key", []) or [],
+                "identity_keys": getattr(args, "identity_key", []) or [],
+                "collision_risk": getattr(args, "collision_risk", "normal"),
+            }
+        )
+    )
+
+
 def _cmd_inventory(args: argparse.Namespace) -> None:
     result = IngestionPipeline().connector.discover(
         args.path,
@@ -129,7 +161,15 @@ def _cmd_inventory(args: argparse.Namespace) -> None:
         repo=args.repo,
         collection=args.collection,
     )
-    documents = [document.to_dict() for document in result if document.source_type != "binary"]
+    context = _parse_context_args(args)
+    documents = []
+    for document in result:
+        if document.source_type == "binary":
+            continue
+        row = document.to_dict()
+        if context["labels"]:
+            row["metadata"] = {**row.get("metadata", {}), "context": context}
+        documents.append(row)
     write_jsonl(args.output, documents)
 
 
@@ -159,6 +199,7 @@ def _cmd_run(args: argparse.Namespace) -> None:
         extractor_mode=args.extractor,
         llm_command=args.llm_command,
         resume=args.resume,
+        context=_parse_context_args(args),
     )
 
 
@@ -231,6 +272,14 @@ def _cmd_refresh(args: argparse.Namespace) -> None:
         repo=args.repo,
         collection=args.collection,
     )
+    context = _parse_context_args(args)
+    if context["labels"]:
+        from dataclasses import replace
+
+        current_documents = [
+            replace(document, metadata={**document.metadata, "context": context})
+            for document in current_documents
+        ]
     store = ContinuityStore(args.db_path) if args.db_path else None
     plan = planner.plan_from_inventory(
         previous_inventory_path=args.previous_inventory,

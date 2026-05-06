@@ -35,6 +35,26 @@ import-report.md
 
 Use `review.md`, `pending-records.jsonl`, and `rejected-candidates.jsonl` to inspect quality before importing anything.
 
+## Context labels for high-collision corpora
+
+For corpora where similarly named records from different environments must not be mixed (for example OpenBSD vs Linux manpages, Acme vs Globex rollout docs, or Rust vs Python API references), attach generic context labels at ingestion time:
+
+```bash
+uv run continuity-ingest run /path/to/openbsd-docs \
+  --include '**/*.md' \
+  --recipe docs \
+  --context os=openbsd \
+  --partition-key os \
+  --identity-key command \
+  --collision-risk high \
+  --policy require-review \
+  --output /tmp/continuity-ingest-openbsd
+```
+
+Labels are opaque key/value strings. Runtime retrieval compares them generically; it does not special-case `os`, `customer`, `language`, or any other domain. Use `--partition-key` only for dimensions where a wrong-context fact is actively harmful. High-collision records with a partition key are withheld from normal retrieval unless the query/eval supplies matching `query_context` or comparison intent is active.
+
+The run propagates context labels through `inventory.jsonl`, `segments.jsonl`, candidate `ingestion.context`, generated retrieval eval `query_context`, and imported `ContextRecord.quality["context"]`. `inventory` and `refresh` accept the same context options so source inventories stay comparable across refresh runs.
+
 ## Scale/debug statistics
 
 Every `run` writes `ingestion-stats.json`. This is the first place to look when stress testing large corpora.
@@ -51,6 +71,9 @@ Important fields:
 - `segments.by_source_type` — segment distribution by originating source type.
 - `candidates.by_kind` — memory type distribution.
 - `candidates.avg_confidence` / `avg_importance` — review-signal sanity checks.
+- `context.documents_with_labels`, `segments_with_labels`, `candidates_with_labels` — propagation checks for context-labeled runs.
+- `context.by_partition_key` / `by_label_key` / `by_collision_risk` — high-collision labeling profile.
+- `context.high_collision_without_partition` — warning signal for labels that cannot enforce hard partition safety.
 - `rejections.by_reason` — quality/safety/dedupe failure modes.
 
 Example quick inspection:

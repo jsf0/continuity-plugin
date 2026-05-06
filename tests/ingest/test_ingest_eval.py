@@ -182,3 +182,54 @@ def test_eval_runner_uses_continuity_retriever_query_expansion(tmp_path) -> None
 
     assert result.passed is True
     assert result.matched_titles == [candidate.title]
+
+
+def test_eval_case_carries_query_context_into_retrieval(tmp_path) -> None:
+    store = ContinuityStore(tmp_path / "continuity.db")
+    candidate = CandidateRecord.from_dict(
+        {
+            **_candidate().to_dict(),
+            "ingestion": {
+                "context": {
+                    "labels": {"os": "openbsd"},
+                    "partition_keys": ["os"],
+                    "collision_risk": "high",
+                }
+            },
+        }
+    )
+    ContinuityImporter(store).import_records([candidate], dry_run=False)
+
+    eval_case = generate_eval_case(candidate)
+    result = EvalRunner(store).run_case(eval_case)
+
+    assert eval_case.query_context["labels"] == {"os": "openbsd"}
+    assert result.passed is True
+
+
+def test_context_eval_fails_without_required_query_context(tmp_path) -> None:
+    store = ContinuityStore(tmp_path / "continuity.db")
+    candidate = CandidateRecord.from_dict(
+        {
+            **_candidate().to_dict(),
+            "ingestion": {
+                "context": {
+                    "labels": {"os": "openbsd"},
+                    "partition_keys": ["os"],
+                    "collision_risk": "high",
+                }
+            },
+        }
+    )
+    ContinuityImporter(store).import_records([candidate], dry_run=False)
+
+    eval_case = EvalCase(
+        eval_id="eval_missing_context",
+        query="What should I know about eval fixture?",
+        expected_record_titles=[candidate.title],
+        expected_tags=[],
+    )
+    result = EvalRunner(store).run_case(eval_case)
+
+    assert result.passed is False
+    assert result.missing_titles == [candidate.title]

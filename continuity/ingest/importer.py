@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from continuity.context_labels import context_from_mapping, context_to_mapping
 from continuity.ingest.models import (
     CandidateRecord,
     stable_hash,
@@ -85,6 +86,11 @@ def candidate_to_context_record(candidate: CandidateRecord) -> ContextRecord:
         trust_level=candidate.trust_level,
     )
     record, _assessment = enrich_record_metadata(record)
+    context_payload = context_to_mapping(context_from_mapping(candidate.ingestion))
+    if context_payload["labels"]:
+        record = ContextRecord.from_dict(
+            {**record.to_dict(), "quality": {**record.quality, "context": context_payload}}
+        )
     return ContextRecord.from_dict(
         {
             **record.to_dict(),

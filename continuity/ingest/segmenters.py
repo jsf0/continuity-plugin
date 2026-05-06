@@ -45,7 +45,9 @@ class HeadingSectionSegmenter:
             segment_text = _blocks_to_text(section_blocks)
             location = _combined_location(section_blocks, document)
             heading_path = [item.text for item in heading_stack]
-            metadata = _segment_metadata(section_blocks, heading_path, segment_text)
+            metadata = _with_document_context(
+                _segment_metadata(section_blocks, heading_path, segment_text), document
+            )
             segments.append(
                 SourceSegment(
                     segment_id=f"{document.source_id}#{_slugify(heading.text)}",
@@ -99,11 +101,14 @@ class ManPageSectionSegmenter:
                     title=section_name,
                     text=segment_text,
                     location=location,
-                    metadata={
-                        "content_hash": stable_hash(segment_text),
-                        "manpage_name": manpage_name,
-                        "manpage_section": section_name,
-                    },
+                    metadata=_with_document_context(
+                        {
+                            "content_hash": stable_hash(segment_text),
+                            "manpage_name": manpage_name,
+                            "manpage_section": section_name,
+                        },
+                        document,
+                    ),
                     scope_project=document.scope_project,
                     scope_repo=document.scope_repo,
                     scope_user=document.scope_user,
@@ -146,7 +151,7 @@ class FixedWindowSegmenter:
                     title=f"{document.title or document.source_id} lines {line_start}-{line_end}",
                     text=text,
                     location=location,
-                    metadata={"content_hash": stable_hash(text)},
+                    metadata=_with_document_context({"content_hash": stable_hash(text)}, document),
                     scope_project=document.scope_project,
                     scope_repo=document.scope_repo,
                     scope_user=document.scope_user,
@@ -166,12 +171,21 @@ def _whole_document_segment(parsed: ParsedDocument, document: SourceDocument) ->
         title=document.title,
         text=text,
         location=_combined_location(content_blocks, document),
-        metadata={"content_hash": stable_hash(text)},
+        metadata=_with_document_context({"content_hash": stable_hash(text)}, document),
         scope_project=document.scope_project,
         scope_repo=document.scope_repo,
         scope_user=document.scope_user,
         scope_profile=document.scope_profile,
     )
+
+
+def _with_document_context(
+    metadata: dict[str, object], document: SourceDocument
+) -> dict[str, object]:
+    context = document.metadata.get("context")
+    if isinstance(context, dict) and context.get("labels"):
+        return {**metadata, "context": dict(context)}
+    return metadata
 
 
 def _blocks_to_text(blocks: list[ParsedBlock]) -> str:

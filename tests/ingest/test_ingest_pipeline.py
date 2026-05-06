@@ -138,3 +138,46 @@ def test_pipeline_safe_auto_generates_evals_for_approved_records(tmp_path) -> No
     assert result.manifest.approved_count == 1
     assert approved[0]["title"] == "Project capsule: continuity-ingestion-fixture"
     assert evals[0]["expected_record_titles"] == [approved[0]["title"]]
+
+
+def test_pipeline_propagates_run_context_labels_to_artifacts_and_evals(tmp_path) -> None:
+    output_dir = tmp_path / "run-context"
+
+    result = IngestionPipeline().run_dry_inventory_and_segment(
+        roots=[FIXTURE_ROOT],
+        output_dir=output_dir,
+        recipe="docs",
+        run_id="run-context",
+        created_at="2026-05-06T20:00:00Z",
+        include=["README.md"],
+        project="continuity-ingestion-fixture",
+        review_policy="safe-auto",
+        context={
+            "labels": {"customer": "Acme"},
+            "partition_keys": ["customer"],
+            "identity_keys": ["project"],
+            "collision_risk": "high",
+        },
+    )
+
+    inventory = read_jsonl(output_dir / "inventory.jsonl")
+    segments = read_jsonl(output_dir / "segments.jsonl")
+    candidates = read_jsonl(output_dir / "candidate-records.jsonl")
+    evals = read_jsonl(output_dir / "retrieval-evals.jsonl")
+    stats = json.loads((output_dir / "ingestion-stats.json").read_text(encoding="utf-8"))
+    expected_context = {
+        "labels": {"customer": "acme"},
+        "partition_keys": ["customer"],
+        "soft_keys": [],
+        "identity_keys": [],
+        "collision_risk": "high",
+    }
+
+    assert result.manifest.approved_count == 1
+    assert inventory[0]["metadata"]["context"] == expected_context
+    assert segments[0]["metadata"]["context"] == expected_context
+    assert candidates[0]["ingestion"]["context"] == expected_context
+    assert evals[0]["query_context"] == expected_context
+    assert stats["context"]["documents_with_labels"] == 1
+    assert stats["context"]["candidates_with_labels"] == 1
+    assert stats["context"]["by_partition_key"] == {"customer": 1}

@@ -25,6 +25,8 @@ class EvalCase:
     forbidden_tags: list[str] = field(default_factory=list)
     scope_project: str | None = None
     source_candidate_ids: list[str] = field(default_factory=list)
+    query_context: dict[str, object] = field(default_factory=dict)
+    comparison_intent: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -37,6 +39,8 @@ class EvalCase:
             "forbidden_tags": self.forbidden_tags,
             "scope_project": self.scope_project,
             "source_candidate_ids": self.source_candidate_ids,
+            "query_context": self.query_context,
+            "comparison_intent": self.comparison_intent,
         }
 
     @classmethod
@@ -51,6 +55,8 @@ class EvalCase:
             forbidden_tags=_string_list(value.get("forbidden_tags")),
             scope_project=_optional_str(value.get("scope_project")),
             source_candidate_ids=_string_list(value.get("source_candidate_ids")),
+            query_context=_dict(value.get("query_context")),
+            comparison_intent=bool(value.get("comparison_intent", False)),
         )
 
 
@@ -108,6 +114,7 @@ def generate_eval_case(candidate: CandidateRecord) -> EvalCase:
         forbidden_tags=[],
         scope_project=candidate.scope_project,
         source_candidate_ids=[candidate.candidate_id],
+        query_context=_dict(candidate.ingestion.get("context")),
     )
 
 
@@ -124,6 +131,8 @@ class EvalRunner:
             eval_case.query,
             scope_project=eval_case.scope_project,
             limit=self.limit,
+            query_context=eval_case.query_context or None,
+            comparison_intent=eval_case.comparison_intent,
         )
         records = [hit.record for hit in hits]
         selected_titles = [record.title for record in records]
@@ -197,6 +206,14 @@ def _unique_tags(records: list[object]) -> list[str]:
                 seen.add(tag)
                 tags.append(tag)
     return tags
+
+
+def _dict(value: object) -> dict[str, object]:
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise ValueError("expected a dict")
+    return dict(value)
 
 
 def _string_list(value: object) -> list[str]:
