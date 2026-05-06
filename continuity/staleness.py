@@ -236,9 +236,10 @@ def _similar(left: str, right: str) -> float:
 
 
 def _records_appear_superseded(older: ContextRecord, newer: ContextRecord) -> bool:
-    return (
-        _similar(older.summary, newer.summary) >= 0.68
-        or _shared_terms(older.summary, newer.summary) >= 4
+    summary_similarity = _similar(older.summary, newer.summary)
+    shared_summary_terms = _shared_terms(older.summary, newer.summary)
+    return summary_similarity >= 0.68 or (
+        shared_summary_terms >= 4 and _shared_term_jaccard(older.summary, newer.summary) >= 0.45
     )
 
 
@@ -259,6 +260,15 @@ def _project_status_key(record: ContextRecord) -> str | None:
 
 def _shared_terms(left: str, right: str) -> int:
     return len(_terms(left) & _terms(right))
+
+
+def _shared_term_jaccard(left: str, right: str) -> float:
+    left_terms = _terms(left)
+    right_terms = _terms(right)
+    union = left_terms | right_terms
+    if not union:
+        return 0.0
+    return len(left_terms & right_terms) / len(union)
 
 
 def _terms(text: str) -> set[str]:

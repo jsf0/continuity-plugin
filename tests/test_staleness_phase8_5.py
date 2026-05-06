@@ -6,6 +6,7 @@ from pathlib import Path
 from continuity import ContinuityProvider
 from continuity.models import ContextRecord
 from continuity.retrieval import ContinuityRetriever
+from continuity.staleness import find_stale_candidates
 from continuity.store import ContinuityStore
 
 
@@ -180,6 +181,60 @@ def test_prune_stale_archive_marks_older_project_state_and_excludes_from_search(
 
     search_result = call(provider, "continuity_search", {"query": "guard-proxy head", "limit": 10})
     assert [item["id"] for item in search_result["results"]] == ["r_new_state"]
+
+
+def test_prune_stale_does_not_supersede_distinct_mirrors_with_generic_titles() -> None:
+    older = ContextRecord.from_dict(
+        {
+            "id": "mirror_old_live_path",
+            "kind": "project_convention",
+            "scope_project": "root",
+            "title": "Hermes global memory",
+            "summary": (
+                "Hermes continuity memory provider in Joseph's live gateway is loaded "
+                "as a plugin from `~/.hermes/plugins/continuity/`; the separate repo "
+                "at `/root/hermes-continuity-memory` may not reflect the live plugin copy."
+            ),
+            "tags": ["built_in_memory", "memory_target:memory", "project_convention"],
+            "entities": [],
+            "confidence": 0.9,
+            "importance": 0.75,
+            "trust_level": "built_in_memory_mirror",
+            "created_at": "2026-05-04T00:00:00Z",
+            "updated_at": "2026-05-04T00:00:00Z",
+            "sources": [{"type": "built_in_memory", "id": "memory"}],
+        }
+    )
+    newer = ContextRecord.from_dict(
+        {
+            "id": "mirror_new_ingestion_plan",
+            "kind": "project_convention",
+            "scope_project": "root",
+            "title": "Hermes global memory",
+            "summary": (
+                "Hermes continuity corpus ingestion design: treat ingestion as an offline "
+                "pluggable extension, not a rewrite. Normalize arbitrary sources into "
+                "SourceDocument → SourceSegment → CandidateRecord → existing "
+                "ContinuityRecord; keep records compact, scoped, source-linked, "
+                "conservative, lower-trust than explicit memories, default dry-run/review, "
+                "generate retrieval evals, track source hashes for refresh/staleness, and "
+                "keep raw source chunks separate for verification. Draft spec saved at "
+                "/root/hermes-continuity-memory/docs/plans/2026-05-05-corpus-ingestion-spec.md."
+            ),
+            "tags": ["built_in_memory", "memory_target:memory", "project_convention"],
+            "entities": [],
+            "confidence": 0.9,
+            "importance": 0.75,
+            "trust_level": "built_in_memory_mirror",
+            "created_at": "2026-05-05T00:00:00Z",
+            "updated_at": "2026-05-05T00:00:00Z",
+            "sources": [{"type": "built_in_memory", "id": "memory"}],
+        }
+    )
+
+    candidates = find_stale_candidates([older, newer])
+
+    assert candidates == []
 
 
 def test_archive_and_restore_tools_control_retrieval_visibility(tmp_path: Path) -> None:
