@@ -68,9 +68,9 @@ memory:
     association_graph:
       enabled: true
 
-    # Disabled by default: continuity normally injects only per-query context.
+    # Tier 0 memory: tiny, high-trust continuity records pinned every turn.
     pinned_system_prompt:
-      enabled: false
+      enabled: true
       max_chars: 1200
       max_records: 6
 
@@ -84,6 +84,11 @@ memory:
 ```
 
 The installer deliberately does **not** edit this file. Then restart Hermes or start a new session.
+
+This is intended to replace stock Hermes memory as the primary memory provider:
+`memory.provider: continuity` routes memory writes and retrieval through
+continuity. Existing built-in memory can be mirrored or migrated, but avoid
+keeping a second large always-on built-in memory prompt alongside continuity.
 
 ## Verify installation
 

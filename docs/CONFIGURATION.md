@@ -50,7 +50,7 @@ memory:
       max_hops: 2
 
     pinned_system_prompt:
-      enabled: false
+      enabled: true
       max_chars: 1200
       max_records: 5
       kinds: [user_preference, project_convention]
@@ -67,6 +67,19 @@ memory:
 ```
 
 ## Top-level options
+
+## Production memory model
+
+The recommended production setup is continuity-exclusive: configure Hermes with
+`memory.provider: continuity` and treat continuity as the primary memory source.
+Stock Hermes memory files can be imported or mirrored for migration, but they
+should not remain a competing always-on prompt context. Tier 0 pinned continuity
+records replace the tiny trusted memory kernel; ordinary continuity retrieval
+handles the long tail per turn.
+
+Keep Tier 0 small and auditable. It should contain durable high-trust facts such
+as stable user preferences and important project conventions, not broad logs or
+large status dumps.
 
 ### `max_records`
 
@@ -288,13 +301,13 @@ Default: `2`.
 
 ## Pinned system prompt options
 
-The provider always returns a compact continuity guidance block from `system_prompt_block()` when initialized. Pinned records are optional and disabled by default.
+The provider always returns a compact continuity guidance block from `system_prompt_block()` when initialized. Pinned records are enabled by default as the Tier 0 memory layer; disable them explicitly if you want retrieval-only continuity.
 
 ### `pinned_system_prompt.enabled`
 
 Whether high-importance continuity records are included in the system prompt at session start.
 
-Default: `false`.
+Default: `true`.
 
 ### `pinned_system_prompt.max_chars`
 

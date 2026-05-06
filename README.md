@@ -2,7 +2,7 @@
 
 Scalable contextual recall for Hermes Agent — without stuffing every memory into the prompt.
 
-Hermes Continuity Memory is a local-first structured memory provider for Hermes Agent. It complements Hermes' tiny always-on `MEMORY.md` / `USER.md` kernel by storing the long tail of project state, decisions, debugging lessons, environment facts, and preferences as scoped SQLite records, then retrieving only a compact relevant working set per turn.
+Hermes Continuity Memory is a local-first structured memory provider for Hermes Agent. In the recommended production setup, it replaces Hermes' stock built-in memory as the primary memory provider: a tiny Tier 0 set of high-trust continuity records is pinned into the system prompt, while the long tail of project state, decisions, debugging lessons, environment facts, and preferences stays in SQLite and is retrieved only when relevant.
 
 ```text
 Recall small. Verify deep. Act from skills.
@@ -14,7 +14,7 @@ Recall small. Verify deep. Act from skills.
 - **Hybrid retrieval** using SQLite FTS5, metadata scoring, optional vectors, optional reranking, and optional association-graph expansion.
 - **Explainable debug tools** for status, search, exact get, retrieval diagnostics, graph inspection, and stale-memory lifecycle operations.
 - **Budgeted prompt injection** via Hermes memory-provider prefetch, with retrieved records treated as informational background rather than instructions.
-- **Built-in memory mirroring** through `on_memory_write()` so curated Hermes memory writes become structured continuity records.
+- **Built-in memory migration/mirroring** through `on_memory_write()` for compatibility, with semantic record titles instead of generic mirror labels.
 - **Project capsules** for scoped project state.
 - **Skill links** from memory records to Hermes skill names without copying skill bodies.
 - **Provider-owned system guidance** so the model knows how to treat continuity when the plugin is active, even when pinned records are disabled.
@@ -31,7 +31,7 @@ Continuity is the scalable contextual layer:
 
 It is **not**:
 
-- a replacement for Hermes' tiny trusted built-in memory kernel;
+- a second always-on prompt dump; Tier 0 pinned continuity records should stay tiny, high-trust, and auditable;
 - a replacement for Hermes skills, which remain procedural memory;
 - a guarantee of perfect recall;
 - a raw transcript chunking system;
@@ -68,8 +68,8 @@ Session search remains the raw archive for conversations that were not distilled
   - `Remember: ...`
   - `Lesson learned: ...`
   - `Decision: ...`
-- Built-in Hermes memory mirroring via `on_memory_write()`.
-- Pinned system-prompt records, disabled by default, plus always-on compact provider guidance.
+- Built-in Hermes memory migration/mirroring via `on_memory_write()` with semantic titles.
+- Pinned system-prompt Tier 0 records, enabled by default, plus always-on compact provider guidance.
 
 ## Install
 
@@ -110,9 +110,9 @@ memory:
     association_graph:
       enabled: true
 
-    # Disabled by default: continuity normally injects only per-query context.
+    # Tier 0 memory: tiny, high-trust continuity records pinned every turn.
     pinned_system_prompt:
-      enabled: false
+      enabled: true
       max_chars: 1200
       max_records: 6
 
@@ -159,7 +159,7 @@ memory:
     association_graph:
       enabled: true
     pinned_system_prompt:
-      enabled: false
+      enabled: true
 ```
 
 See [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md) for all options.

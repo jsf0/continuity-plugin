@@ -16,7 +16,7 @@ VALID_RERANKER_BACKENDS = frozenset({"none", "sentence-transformers", "cross-enc
 class PinnedSystemPromptConfig:
     """Configuration for continuity records pinned into the system prompt."""
 
-    enabled: bool = False
+    enabled: bool = True
     max_chars: int = 1200
     max_records: int = 5
     kinds: tuple[str, ...] = ("user_preference", "project_convention")
@@ -131,7 +131,7 @@ class ContinuityConfig:
             reranker_weight=max(0.0, _float(reranker.get("weight"), 2.0)),
             reranker_top_k=max(1, _int(reranker.get("top_k"), 20)),
             pinned_system_prompt=PinnedSystemPromptConfig(
-                enabled=_bool(pinned.get("enabled"), False),
+                enabled=_bool(pinned.get("enabled"), True),
                 max_chars=max(200, _int(pinned.get("max_chars"), 1200)),
                 max_records=max(1, _int(pinned.get("max_records"), 5)),
                 kinds=tuple(_string_list(pinned.get("kinds")))

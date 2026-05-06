@@ -52,6 +52,32 @@ def test_system_prompt_block_renders_pinned_high_importance_records(tmp_path: Pa
     assert "This should not be pinned" not in block
 
 
+def test_pinned_system_prompt_is_enabled_by_default(tmp_path: Path) -> None:
+    provider = ContinuityProvider()
+    provider.initialize(
+        session_id="pinned-default",
+        hermes_home=str(tmp_path),
+        continuity_config={},
+    )
+    assert provider._store is not None
+    provider._store.upsert_record(
+        ContextRecord.new(
+            id="r_default_pin",
+            kind="user_preference",
+            title="Work mode",
+            summary="Joseph prefers continuity tier zero memory to replace stock memory.",
+            importance=0.95,
+            confidence=0.95,
+            trust_level="explicit_user",
+        )
+    )
+
+    block = provider.system_prompt_block()
+
+    assert "CONTINUITY PINNED MEMORY" in block
+    assert "tier zero memory" in block
+
+
 def test_system_prompt_block_includes_continuity_guidance_when_pinning_disabled(
     tmp_path: Path,
 ) -> None:

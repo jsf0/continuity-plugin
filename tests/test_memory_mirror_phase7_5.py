@@ -36,7 +36,7 @@ def test_on_memory_write_adds_user_preference_record(tmp_path: Path, monkeypatch
     record = records[0]
     assert record.id.startswith("mirror_user_")
     assert record.kind == "user_preference"
-    assert record.title == "Hermes user memory"
+    assert record.title == "Joseph prefers foundation-first sequencing"
     assert record.summary == "Joseph prefers foundation-first sequencing."
     assert record.trust_level == "built_in_memory_mirror"
     assert record.scope_project is None
@@ -151,3 +151,20 @@ def test_mirrored_memory_record_includes_quality_metadata() -> None:
     assert "guard-proxy" in record.entities
     assert record.quality["score"] <= 1.0
     assert "warnings" in record.quality
+
+
+def test_mirrored_memory_record_uses_semantic_title_without_generic_warning() -> None:
+    record = build_mirrored_memory_record(
+        action="add",
+        target="memory",
+        content=(
+            "Framework Desktop ships with Secure Boot enabled by default; "
+            "disable it before booting the OpenBSD installer."
+        ),
+        scope_project="hardware-lab",
+    )
+
+    assert record is not None
+    assert record.title == "Framework Desktop ships with Secure Boot enabled by default"
+    assert record.title not in {"Hermes global memory", "Hermes user memory"}
+    assert "generic_title" not in record.quality["warnings"]

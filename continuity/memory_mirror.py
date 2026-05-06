@@ -55,7 +55,7 @@ def build_mirrored_memory_record(
     record = ContextRecord.new(
         id=mirrored_memory_record_id(normalized_target, content),
         kind=kind,
-        title=_title_for_target(normalized_target),
+        title=semantic_memory_title(sanitized),
         summary=sanitized,
         scope_project=record_scope,
         tags=_tags_for_record(normalized_target, kind, extracted.tags),
@@ -119,10 +119,22 @@ def _record_scope(target: str, content: str, kind: str, scope_project: str | Non
     return None
 
 
-def _title_for_target(target: str) -> str:
-    if target == "user":
-        return "Hermes user memory"
-    return "Hermes global memory"
+def semantic_memory_title(content: str, *, max_chars: int = 80) -> str:
+    """Return a compact semantic title for mirrored memory content."""
+
+    text = re.sub(r"\s+", " ", content.strip())
+    text = re.sub(
+        r"^(?:user(?:'s)?\s+)?(?:preference|memory|lesson learned|decision|gotcha)\s*[:\-]\s*",
+        "",
+        text,
+        flags=re.IGNORECASE,
+    ).strip()
+    first_clause = re.split(r"[.;\n]", text, maxsplit=1)[0].strip()
+    title = first_clause or text
+    title = re.sub(r"\s+", " ", title).strip(" -:;.,")
+    if len(title) > max_chars:
+        title = title[:max_chars].rsplit(" ", 1)[0].strip(" -:;.,") or title[:max_chars].strip()
+    return title or "Continuity memory record"
 
 
 def _tags_for_record(target: str, kind: str, extracted_tags: tuple[str, ...]) -> list[str]:
