@@ -165,3 +165,75 @@ def test_continuity_quality_report_returns_warning_records(tmp_path: Path) -> No
 
     assert payload["success"] is True
     assert any(item["id"] == "r_quality_report_sparse" for item in payload["records"])
+
+
+def test_continuity_quality_report_can_recompute_and_apply_quality_backfill(
+    tmp_path: Path,
+) -> None:
+    provider = initialized_provider(tmp_path)
+    call(
+        provider,
+        "continuity_add",
+        {
+            "id": "r_quality_backfill_tool",
+            "kind": "lesson_learned",
+            "title": "Notes",
+            "summary": "Use documented retry behavior when the worker queue stalls.",
+            "details": "Quality diagnostics must stay out of retrieval content.",
+            "tags": [],
+            "entities": [],
+            "trust_level": "corpus_distilled",
+        },
+    )
+    assert provider._store is not None
+    with provider._store.connect() as conn:
+        conn.execute(
+            "UPDATE context_records SET quality_json = '{}' WHERE id = ?",
+            ("r_quality_backfill_tool",),
+        )
+        before = conn.execute(
+            """
+            SELECT summary, details, tags_json, entities_json, embedding_text, quality_json
+            FROM context_records WHERE id = ?
+            """,
+            ("r_quality_backfill_tool",),
+        ).fetchone()
+
+    report_only = call(
+        provider,
+        "continuity_quality_report",
+        {"limit": 10, "recompute": True, "apply_backfill": False},
+    )
+    after_report_only = provider._store.get_record("r_quality_backfill_tool")
+
+    assert report_only["success"] is True
+    assert report_only["mode"] == "recompute"
+    assert report_only["counts"]["drift_records"] == 1
+    assert report_only["updated_count"] == 0
+    assert after_report_only is not None
+    assert after_report_only.quality == {}
+
+    applied = call(
+        provider,
+        "continuity_quality_report",
+        {"limit": 10, "recompute": True, "apply_backfill": True},
+    )
+    with provider._store.connect() as conn:
+        after = conn.execute(
+            """
+            SELECT summary, details, tags_json, entities_json, embedding_text, quality_json
+            FROM context_records WHERE id = ?
+            """,
+            ("r_quality_backfill_tool",),
+        ).fetchone()
+
+    assert applied["success"] is True
+    assert applied["mode"] == "recompute"
+    assert applied["counts"]["drift_records"] == 0
+    assert applied["updated_count"] == 1
+    assert dict(before)["summary"] == dict(after)["summary"]
+    assert dict(before)["details"] == dict(after)["details"]
+    assert dict(before)["tags_json"] == dict(after)["tags_json"]
+    assert dict(before)["entities_json"] == dict(after)["entities_json"]
+    assert dict(before)["embedding_text"] == dict(after)["embedding_text"]
+    assert dict(after)["quality_json"] != "{}"

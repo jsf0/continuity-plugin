@@ -9,6 +9,7 @@ from .config import DreamConfig
 from .dream import run_dream_cycle
 from .embeddings import VectorBackend
 from .models import ContextRecord, SkillLink, SourceRef
+from .quality_backfill import apply_quality_backfill, build_quality_backfill_report
 from .record_quality import enrich_record_metadata
 from .reranking import RerankerBackend
 from .retrieval import ContinuityRetriever, RetrievalHit, candidate_to_debug_dict
@@ -229,13 +230,31 @@ CONTINUITY_DREAM_SCHEMA: dict[str, object] = {
 
 CONTINUITY_QUALITY_REPORT_SCHEMA: dict[str, object] = {
     "name": "continuity_quality_report",
-    "description": "Report continuity records with write-time quality warnings.",
+    "description": (
+        "Report persisted write-time quality warnings, or recompute/apply "
+        "conservative quality_json-only backfill when requested."
+    ),
     "parameters": {
         "type": "object",
         "properties": {
             "limit": {
                 "type": "integer",
-                "description": "Maximum warning records to return.",
+                "description": "Maximum warning/drift records to return.",
+            },
+            "recompute": {
+                "type": "boolean",
+                "description": "If true, recompute quality for existing records and report drift.",
+            },
+            "apply_backfill": {
+                "type": "boolean",
+                "description": (
+                    "When recompute is true, persist recomputed quality_json only; "
+                    "retrieval content and metadata are left untouched."
+                ),
+            },
+            "active_only": {
+                "type": "boolean",
+                "description": "If true in recompute mode, inspect only active records.",
             },
         },
         "required": [],
@@ -419,9 +438,36 @@ def handle_debug_retrieval(
 
 def handle_quality_report(store: ContinuityStore, args: dict[str, Any]) -> dict[str, object]:
     limit = _bounded_int(args.get("limit"), default=100, minimum=1, maximum=500)
+    recompute = _bool(args.get("recompute"), False)
+    if recompute:
+        active_only = _bool(args.get("active_only"), False)
+        apply_backfill_requested = _bool(args.get("apply_backfill"), False)
+        report = (
+            apply_quality_backfill(store, limit=limit, active_only=active_only)
+            if apply_backfill_requested
+            else build_quality_backfill_report(store, limit=limit, active_only=active_only)
+        )
+        return {
+            "success": True,
+            "mode": "recompute",
+            "applied": apply_backfill_requested,
+            "updated_count": report.updated_count,
+            "records": report.records,
+            "top_warnings": report.top_warnings,
+            "counts": {
+                "record_count": report.record_count,
+                "warning_records": report.warning_count,
+                "review_required": report.review_required_count,
+                "drift_records": report.drift_count,
+            },
+        }
+
     records = store.list_quality_inventory(limit=limit)
     return {
         "success": True,
+        "mode": "persisted",
+        "applied": False,
+        "updated_count": 0,
         "records": records,
         "counts": {
             "warning_records": len(records),
