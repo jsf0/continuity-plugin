@@ -570,6 +570,9 @@ class ContinuityRetriever:
             candidate.reranker_boost = candidate.reranker_score * self.reranker_weight
             candidate.reasons.append("reranker")
             if candidate.reranker_score < self.reranker_min_score:
+                if _reranker_rejection_overridden_by_strong_personal_anchor(candidate):
+                    candidate.reasons.append("strong_personal_anchor")
+                    continue
                 candidate.rejected_reason = "below_min_reranker_score"
                 selected.remove(candidate)
                 rejected.append(candidate)
@@ -819,9 +822,29 @@ def _record_metadata_tokens(record: ContextRecord) -> set[str]:
     return tokens
 
 
+def _reranker_rejection_overridden_by_strong_personal_anchor(
+    candidate: CandidateScore,
+) -> bool:
+    """Keep strongly anchored personal records even when a generic reranker is cold.
+
+    Local cross-encoders often under-score short personal-context records for
+    implicit first-person questions (for example vehicle/towing setup).  Strong
+    tag/entity matches are safer direct anchors than relying entirely on graph
+    rescue, but require multiple metadata anchors so a single incidental tag does
+    not bypass the reranker.
+    """
+    if candidate.record.kind not in PERSONAL_KINDS:
+        return False
+    return candidate.entity_score >= ENTITY_BONUS or candidate.tag_score >= (TAG_BONUS * 2)
+
+
 def _candidate_activation(candidate: CandidateScore) -> float:
     """Normalize direct or anchored candidate strength for graph spreading."""
-    if candidate.reranker_score > 0 and candidate.rejected_reason != "below_min_reranker_score":
+    if (
+        candidate.reranker_score > 0
+        and candidate.rejected_reason != "below_min_reranker_score"
+        and "strong_personal_anchor" not in candidate.reasons
+    ):
         return max(0.0, min(1.0, candidate.reranker_score))
     return max(0.0, min(1.0, candidate.total / 5.0))
 

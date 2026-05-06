@@ -108,7 +108,7 @@ def test_store_persists_undirected_association_edges_and_caps_out_degree(tmp_pat
     assert all(edge.edge_type == "test" for edge in edges)
 
 
-def test_graph_spreading_adds_associative_neighbor_from_activation_only_seed(tmp_path):
+def test_graph_spreading_adds_associative_neighbor_from_strong_personal_seed(tmp_path):
     store = ContinuityStore(tmp_path / "continuity.db")
     store.migrate()
     boat = _record(
@@ -143,8 +143,14 @@ def test_graph_spreading_adds_associative_neighbor_from_activation_only_seed(tmp
     ).debug_search("what boat sizes should I consider?", limit=5)
 
     selected_ids = [candidate.record.id for candidate in debug["selected"]]
-    assert "boat_context" not in selected_ids
+    assert "boat_context" in selected_ids
     assert "truck_context" in selected_ids
+
+    boat_candidate = next(
+        candidate for candidate in debug["selected"] if candidate.record.id == "boat_context"
+    )
+    assert boat_candidate.retrieval_role == "direct_seed"
+    assert "strong_personal_anchor" in boat_candidate.reasons
 
     truck_candidate = next(
         candidate for candidate in debug["selected"] if candidate.record.id == "truck_context"
@@ -152,7 +158,9 @@ def test_graph_spreading_adds_associative_neighbor_from_activation_only_seed(tmp
     assert truck_candidate.retrieval_role == "associative_neighbor"
     assert "associative_graph" in truck_candidate.reasons
     assert truck_candidate.activation >= 0.3
-    assert debug["activation_trace"]["activation_seeds"][0]["record_id"] == "boat_context"
+    assert any(
+        seed["record_id"] == "boat_context" for seed in debug["activation_trace"]["direct_seeds"]
+    )
     assert debug["activation_trace"]["included_neighbors"][0]["record_id"] == "truck_context"
 
 

@@ -3,8 +3,17 @@ from __future__ import annotations
 from pathlib import Path
 
 from continuity.models import ContextRecord
+from continuity.reranking import RerankHit
 from continuity.retrieval import ContinuityRetriever
 from continuity.store import ContinuityStore
+
+
+class RejectingReranker:
+    def is_available(self) -> bool:
+        return True
+
+    def rerank(self, query: str, records: list[ContextRecord]) -> list[RerankHit]:
+        return [RerankHit(record_id=record.id, score=0.01) for record in records]
 
 
 def _record(
@@ -49,6 +58,13 @@ def _store(tmp_path: Path) -> ContinuityStore:
             entities=["Blue Ridge Utility Van"],
         ),
         _record(
+            "generic_towing_retrieval_note",
+            "Continuity retrieval should stay general-purpose",
+            "User wants continuity-memory improvements to be general-purpose, not hardcoded for specific towing examples.",
+            tags=["towing", "retrieval"],
+            entities=[],
+        ),
+        _record(
             "workstation_context",
             "Atlas Workstation local inference setup",
             "User owns an Atlas Workstation used for local model experiments and GPU testing.",
@@ -89,6 +105,24 @@ def test_dynamic_expansion_recovers_related_towing_context_without_domain_aliase
     assert "van_context" in selected_ids
     expansion_terms = {term["term"] for term in debug.get("dynamic_expansion", [])}
     assert {"towing", "trailer"} & expansion_terms
+
+
+def test_personal_context_with_strong_metadata_survives_cold_reranker(
+    tmp_path: Path,
+) -> None:
+    debug = ContinuityRetriever(
+        _store(tmp_path),
+        reranker_backend=RejectingReranker(),
+        reranker_min_score=0.15,
+        association_enabled=True,
+    ).debug_search("how much camper can I pull with my setup?", limit=5)
+
+    selected_by_id = {candidate.record.id: candidate for candidate in debug["selected"]}
+    assert selected_by_id["camper_context"].retrieval_role == "direct_seed"
+    assert "strong_personal_anchor" in selected_by_id["camper_context"].reasons
+    assert selected_by_id["van_context"].retrieval_role == "direct_seed"
+    assert "strong_personal_anchor" in selected_by_id["van_context"].reasons
+    assert "generic_towing_retrieval_note" not in selected_by_id
 
 
 def test_ambiguous_framework_query_does_not_retrieve_unrelated_hardware(
