@@ -29,7 +29,7 @@ def test_store_migrates_idempotently(tmp_path: Path) -> None:
     store.migrate()
 
     assert db_path.exists()
-    assert store.schema_versions() == [1, 2, 3, 4, 5]
+    assert store.schema_versions() == [1, 2, 3, 4, 6]
 
 
 def test_upsert_get_list_and_delete_record(tmp_path: Path) -> None:
@@ -71,3 +71,45 @@ def test_fts_search_finds_summary_tags_and_entities(tmp_path: Path) -> None:
     assert [hit.record.id for hit in store.fts_search("delegate_task", limit=5)] == ["r1"]
     assert [hit.record.id for hit in store.fts_search("api_calls", limit=5)] == ["r1"]
     assert store.fts_search("llama-server", limit=5) == []
+
+
+def test_store_round_trips_record_quality_metadata(tmp_path: Path) -> None:
+    store = ContinuityStore(tmp_path / "continuity.db")
+    store.migrate()
+    record = ContextRecord.new(
+        id="r_quality_store",
+        kind="project_convention",
+        title="Quality store test",
+        summary="Quality metadata is persisted in a JSON column.",
+        tags=["quality"],
+        entities=["quality metadata"],
+        trust_level="explicit_user",
+        quality={"warnings": ["sparse_metadata"], "score": 0.76},
+    )
+
+    store.upsert_record(record)
+    fetched = store.get_record(record.id)
+
+    assert fetched is not None
+    assert fetched.quality["warnings"] == ["sparse_metadata"]
+
+
+def test_list_quality_inventory_reports_sparse_records(tmp_path: Path) -> None:
+    store = ContinuityStore(tmp_path / "continuity.db")
+    store.migrate()
+    record = ContextRecord.new(
+        id="r_sparse",
+        kind="user_preference",
+        title="Sparse preference",
+        summary="User prefers concise replies.",
+        tags=["user_preference"],
+        entities=[],
+        trust_level="explicit_user",
+        quality={"warnings": ["sparse_metadata", "no_entities"], "score": 0.76},
+    )
+    store.upsert_record(record)
+
+    inventory = store.list_quality_inventory(limit=10)
+
+    assert inventory[0]["id"] == "r_sparse"
+    assert "sparse_metadata" in inventory[0]["warnings"]

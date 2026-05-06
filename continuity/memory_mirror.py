@@ -7,6 +7,7 @@ import re
 
 from .metadata_extraction import extract_metadata
 from .models import ContextRecord, SourceRef, utc_now
+from .record_quality import enrich_record_metadata
 from .security import is_safe_memory_text, redact_sensitive_text, truncate_text
 
 MIRROR_MAX_CHARS = 1200
@@ -51,7 +52,7 @@ def build_mirrored_memory_record(
         created_at=utc_now(),
     )
     extracted = extract_metadata(sanitized)
-    return ContextRecord.new(
+    record = ContextRecord.new(
         id=mirrored_memory_record_id(normalized_target, content),
         kind=kind,
         title=_title_for_target(normalized_target),
@@ -64,6 +65,8 @@ def build_mirrored_memory_record(
         importance=0.75,
         trust_level="built_in_memory_mirror",
     )
+    record, _assessment = enrich_record_metadata(record)
+    return record
 
 
 def mirrored_memory_record_id(target: str, content: str) -> str:

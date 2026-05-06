@@ -196,6 +196,7 @@ class ContextRecord:
     expires_at: str | None = None
     source_hash: str | None = None
     embedding_text: str | None = None
+    quality: dict[str, object] = field(default_factory=dict)
     status: str = "active"
     superseded_by: str | None = None
     stale_reason: str | None = None
@@ -232,6 +233,7 @@ class ContextRecord:
         confidence: float = 0.5,
         importance: float = 0.5,
         trust_level: str = "session_extracted",
+        quality: dict[str, object] | None = None,
     ) -> ContextRecord:
         now = utc_now()
         normalized_tags = _normalize_string_list(tags)
@@ -255,6 +257,7 @@ class ContextRecord:
             created_at=now,
             updated_at=now,
             embedding_text=None,
+            quality=dict(quality or {}),
         )
         return record.with_embedding_text()
 
@@ -300,6 +303,7 @@ class ContextRecord:
             "expires_at": self.expires_at,
             "source_hash": self.source_hash,
             "embedding_text": self.embedding_text,
+            "quality": dict(self.quality),
             "status": self.status,
             "superseded_by": self.superseded_by,
             "stale_reason": self.stale_reason,
@@ -331,6 +335,7 @@ class ContextRecord:
             expires_at=_optional_str(value.get("expires_at")),
             source_hash=_optional_str(value.get("source_hash")),
             embedding_text=_optional_str(value.get("embedding_text")),
+            quality=_object_dict(value.get("quality")),
             status=str(value.get("status") or "active"),
             superseded_by=_optional_str(value.get("superseded_by")),
             stale_reason=_optional_str(value.get("stale_reason")),
@@ -381,3 +386,11 @@ def _dict_list(value: object) -> list[dict[str, Any]]:
     if not isinstance(value, list):
         raise ValueError("expected a list of dictionaries")
     return [item for item in value if isinstance(item, dict)]
+
+
+def _object_dict(value: object) -> dict[str, object]:
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise ValueError("expected a dictionary")
+    return dict(value)

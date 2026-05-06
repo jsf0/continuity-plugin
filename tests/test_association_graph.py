@@ -41,6 +41,33 @@ def _record(
     )
 
 
+def test_upsert_skips_association_edges_for_quality_review_required_record(tmp_path: Path):
+    store = ContinuityStore(tmp_path / "continuity.db")
+    store.migrate()
+    good = _record(
+        "good",
+        "OpenBSD deployment uses rcctl restart.",
+        tags=["openbsd", "deployment"],
+        entities=["OpenBSD", "rcctl"],
+    )
+    weak = ContextRecord.from_dict(
+        {
+            **_record(
+                "weak",
+                "OpenBSD notes use rcctl restart.",
+                tags=["openbsd"],
+                entities=["OpenBSD"],
+            ).to_dict(),
+            "quality": {"review_required": True, "warnings": ["sparse_metadata"]},
+        }
+    )
+
+    store.upsert_record(good)
+    store.upsert_record(weak)
+
+    assert store.list_association_edges("weak") == []
+
+
 def test_store_persists_undirected_association_edges_and_caps_out_degree(tmp_path):
     store = ContinuityStore(tmp_path / "continuity.db")
     store.migrate()

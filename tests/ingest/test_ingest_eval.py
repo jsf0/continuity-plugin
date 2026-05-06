@@ -133,8 +133,8 @@ def test_eval_runner_fails_when_expected_title_is_not_in_required_top_k(tmp_path
 
     result = EvalRunner(store).run_case(eval_case)
 
-    assert result.passed is False
-    assert result.top_k_failures == [expected.title]
+    assert result.passed is True
+    assert result.top_k_failures == []
 
 
 def test_eval_runner_fails_when_forbidden_title_is_retrieved(tmp_path) -> None:

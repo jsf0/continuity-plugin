@@ -48,6 +48,22 @@ class ReviewPolicy:
                 status="pending_review",
                 reasons=["sensitive_kind_requires_review"],
             )
+        quality = (
+            candidate.ingestion.get("quality") if isinstance(candidate.ingestion, dict) else None
+        )
+        warnings = set(quality.get("warnings", [])) if isinstance(quality, dict) else set()
+        review_warnings = warnings & {
+            "sparse_metadata",
+            "no_entities",
+            "unknown_or_empty_facets",
+            "huge_entity_list",
+        }
+        if review_warnings:
+            return ReviewDecision(
+                candidate_id=candidate.candidate_id,
+                status="pending_review",
+                reasons=["quality_warning_requires_review", *sorted(review_warnings)],
+            )
         if self.mode == "safe-auto":
             if candidate.confidence >= 0.75 and candidate.importance >= 0.5:
                 return ReviewDecision(

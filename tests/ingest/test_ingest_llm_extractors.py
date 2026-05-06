@@ -236,7 +236,9 @@ def test_pipeline_can_use_injected_llm_extractor(tmp_path) -> None:
 
     assert result.manifest.candidate_count == 1
     assert candidates[0]["ingestion"]["extractor"] == "llm-candidate-extractor"
-    assert approved[0]["title"] == "Source refs are mandatory"
+    pending = read_jsonl(output_dir / "pending-records.jsonl")
+    assert pending[0]["title"] == "Source refs are mandatory"
+    assert approved == []
 
 
 def test_pipeline_llm_resume_reuses_completed_segment_results(tmp_path) -> None:

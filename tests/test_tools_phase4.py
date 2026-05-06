@@ -36,6 +36,7 @@ def test_phase4_provider_exposes_search_get_add_delete_status_tools() -> None:
         "continuity_association_edges",
         "continuity_reindex_vectors",
         "continuity_dream",
+        "continuity_quality_report",
     }
 
 
@@ -118,3 +119,49 @@ def test_search_tool_validates_query(tmp_path: Path) -> None:
 
     assert result["success"] is False
     assert "query" in result["error"]
+
+
+def test_continuity_add_enriches_literal_metadata_before_storage(tmp_path: Path) -> None:
+    provider = initialized_provider(tmp_path)
+
+    payload = call(
+        provider,
+        "continuity_add",
+        {
+            "id": "r_manual_enriched",
+            "kind": "project_convention",
+            "title": "OpenBSD guard-proxy deployment",
+            "summary": "guard-proxy deployment uses tag:openbsd and rcctl restart.",
+            "tags": ["deployment"],
+            "entities": [],
+            "trust_level": "explicit_user",
+        },
+    )
+
+    assert payload["success"] is True
+    record = payload["record"]
+    assert "openbsd" in record["tags"]
+    assert "guard-proxy" in record["entities"]
+    assert record["quality"]["score"] <= 1.0
+
+
+def test_continuity_quality_report_returns_warning_records(tmp_path: Path) -> None:
+    provider = initialized_provider(tmp_path)
+    call(
+        provider,
+        "continuity_add",
+        {
+            "id": "r_quality_report_sparse",
+            "kind": "user_preference",
+            "title": "Sparse preference",
+            "summary": "User prefers concise replies.",
+            "tags": ["user_preference"],
+            "entities": [],
+            "trust_level": "explicit_user",
+        },
+    )
+
+    payload = call(provider, "continuity_quality_report", {"limit": 10})
+
+    assert payload["success"] is True
+    assert any(item["id"] == "r_quality_report_sparse" for item in payload["records"])

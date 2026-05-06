@@ -17,6 +17,7 @@ def _candidate(
     confidence: float = 0.8,
     importance: float = 0.7,
     trust_level: str = "corpus_distilled",
+    ingestion: dict[str, object] | None = None,
 ) -> CandidateRecord:
     return CandidateRecord(
         candidate_id=candidate_id,
@@ -29,6 +30,7 @@ def _candidate(
         importance=importance,
         trust_level=trust_level,
         source_refs=[_ref()],
+        ingestion=ingestion or {},
         review={"status": "pending_review"},
     )
 
@@ -68,6 +70,20 @@ def test_review_policy_safe_auto_keeps_user_preferences_pending() -> None:
 
     assert decision.status == "pending_review"
     assert "sensitive_kind_requires_review" in decision.reasons
+
+
+def test_safe_auto_review_does_not_approve_sparse_metadata_candidate() -> None:
+    candidate = _candidate(
+        "cand_sparse",
+        confidence=0.9,
+        importance=0.9,
+        ingestion={"quality": {"warnings": ["sparse_metadata"], "score": 0.88}},
+    )
+
+    decision = ReviewPolicy(mode="safe-auto").decide(candidate)
+
+    assert decision.status == "pending_review"
+    assert "quality_warning_requires_review" in decision.reasons
 
 
 def test_write_review_artifacts_splits_candidates_and_rejections(tmp_path) -> None:

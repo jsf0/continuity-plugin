@@ -13,6 +13,7 @@ from continuity.ingest.models import (
     SourceRef as IngestSourceRef,
 )
 from continuity.models import ContextRecord, SourceRef
+from continuity.record_quality import enrich_record_metadata
 from continuity.store import ContinuityStore
 
 
@@ -83,6 +84,7 @@ def candidate_to_context_record(candidate: CandidateRecord) -> ContextRecord:
         importance=candidate.importance,
         trust_level=candidate.trust_level,
     )
+    record, _assessment = enrich_record_metadata(record)
     return ContextRecord.from_dict(
         {
             **record.to_dict(),

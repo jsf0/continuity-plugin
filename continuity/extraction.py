@@ -7,6 +7,7 @@ import re
 from collections.abc import Iterable
 
 from .models import ContextRecord, SourceRef
+from .record_quality import enrich_record_metadata
 from .security import is_safe_memory_text
 
 _PREFIX_PATTERNS = [
@@ -60,21 +61,21 @@ def extract_records_from_messages(
             if record_id in seen_ids:
                 continue
             seen_ids.add(record_id)
-            records.append(
-                ContextRecord.new(
-                    id=record_id,
-                    kind=kind,
-                    title=_title_for(kind, summary),
-                    summary=summary,
-                    scope_project=scope_project,
-                    tags=_tags_for(kind, summary),
-                    entities=_entities_for(summary),
-                    sources=[SourceRef(type="session", id=session_id, range=f"turn {index}")],
-                    confidence=0.8,
-                    importance=0.75,
-                    trust_level="session_extracted",
-                )
+            record = ContextRecord.new(
+                id=record_id,
+                kind=kind,
+                title=_title_for(kind, summary),
+                summary=summary,
+                scope_project=scope_project,
+                tags=_tags_for(kind, summary),
+                entities=_entities_for(summary),
+                sources=[SourceRef(type="session", id=session_id, range=f"turn {index}")],
+                confidence=0.8,
+                importance=0.75,
+                trust_level="session_extracted",
             )
+            record, _assessment = enrich_record_metadata(record)
+            records.append(record)
             break
     return records
 

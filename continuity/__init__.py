@@ -32,6 +32,7 @@ from .tools import (
     handle_dream,
     handle_get,
     handle_prune_stale,
+    handle_quality_report,
     handle_reindex_vectors,
     handle_restore,
     handle_search,
@@ -310,6 +311,7 @@ class ContinuityProvider(MemoryProvider):
                 "continuity_association_edges",
                 "continuity_reindex_vectors",
                 "continuity_dream",
+                "continuity_quality_report",
             }
             and self._store is None
         ):
@@ -386,6 +388,8 @@ class ContinuityProvider(MemoryProvider):
                 ),
                 ensure_ascii=False,
             )
+        if tool_name == "continuity_quality_report" and self._store is not None:
+            return json.dumps(handle_quality_report(self._store, args), ensure_ascii=False)
         if tool_name == "continuity_get" and self._store is not None:
             return json.dumps(handle_get(self._store, args), ensure_ascii=False)
         if tool_name == "continuity_add" and self._store is not None:

@@ -9,6 +9,7 @@ from .config import DreamConfig
 from .dream import run_dream_cycle
 from .embeddings import VectorBackend
 from .models import ContextRecord, SkillLink, SourceRef
+from .record_quality import enrich_record_metadata
 from .reranking import RerankerBackend
 from .retrieval import ContinuityRetriever, RetrievalHit, candidate_to_debug_dict
 from .staleness import find_stale_candidates
@@ -226,6 +227,21 @@ CONTINUITY_DREAM_SCHEMA: dict[str, object] = {
     },
 }
 
+CONTINUITY_QUALITY_REPORT_SCHEMA: dict[str, object] = {
+    "name": "continuity_quality_report",
+    "description": "Report continuity records with write-time quality warnings.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "limit": {
+                "type": "integer",
+                "description": "Maximum warning records to return.",
+            },
+        },
+        "required": [],
+    },
+}
+
 ALL_TOOL_SCHEMAS = [
     CONTINUITY_STATUS_SCHEMA,
     CONTINUITY_SEARCH_SCHEMA,
@@ -239,6 +255,7 @@ ALL_TOOL_SCHEMAS = [
     CONTINUITY_ASSOCIATION_EDGES_SCHEMA,
     CONTINUITY_REINDEX_VECTORS_SCHEMA,
     CONTINUITY_DREAM_SCHEMA,
+    CONTINUITY_QUALITY_REPORT_SCHEMA,
 ]
 
 
@@ -334,6 +351,7 @@ def handle_add(store: ContinuityStore, args: dict[str, Any]) -> dict[str, object
     except (TypeError, ValueError) as exc:
         return {"success": False, "error": str(exc)}
     try:
+        record, _assessment = enrich_record_metadata(record)
         skill_links = _skill_links(record.id, args.get("skill_links"))
     except (TypeError, ValueError) as exc:
         return {"success": False, "error": str(exc)}
@@ -396,6 +414,19 @@ def handle_debug_retrieval(
         "selected": [candidate_to_debug_dict(item) for item in debug["selected"]],
         "rejected": [candidate_to_debug_dict(item) for item in debug["rejected"]],
         "activation_trace": debug.get("activation_trace", {}),
+    }
+
+
+def handle_quality_report(store: ContinuityStore, args: dict[str, Any]) -> dict[str, object]:
+    limit = _bounded_int(args.get("limit"), default=100, minimum=1, maximum=500)
+    records = store.list_quality_inventory(limit=limit)
+    return {
+        "success": True,
+        "records": records,
+        "counts": {
+            "warning_records": len(records),
+            "review_required": sum(1 for item in records if item.get("review_required")),
+        },
     }
 
 

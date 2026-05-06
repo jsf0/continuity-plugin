@@ -136,13 +136,16 @@ def test_golden_corpus_llm_pipeline_rejects_unsafe_model_candidates(tmp_path) ->
         "Do not store emergency contacts in recipe notes",
         "Private draft contains fake secret",
     }
-    assert _titles(approved) == {
-        "Cold soak",
+    assert _titles(approved) == {"Cold soak"}
+    assert _titles(pending) == {
         "Do not store emergency contacts in recipe notes",
+        "Private draft contains fake secret",
     }
-    assert _titles(pending) == {"Private draft contains fake secret"}
-    assert "[REDACTED_SECRET]" in pending[0]["summary"]
-    assert "trail-test-secret" not in pending[0]["summary"]
+    private_pending = next(
+        row for row in pending if row["title"] == "Private draft contains fake secret"
+    )
+    assert "[REDACTED_SECRET]" in private_pending["summary"]
+    assert "trail-test-secret" not in private_pending["summary"]
     rejection_reasons = {reason for row in rejected for reason in row["reasons"]}
     assert "prompt_injection_detected" in rejection_reasons
 

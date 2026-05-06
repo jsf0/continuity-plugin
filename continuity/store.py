@@ -12,7 +12,7 @@ from .association import association_strength
 from .models import AssociationEdge, ContextRecord, SkillLink, SourceRef, utc_now
 from .security import sanitize_observation_text
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 
 @dataclass(frozen=True)
@@ -67,6 +67,7 @@ class ContinuityStore:
                   expires_at TEXT,
                   source_hash TEXT,
                   embedding_text TEXT,
+                  quality_json TEXT NOT NULL DEFAULT '{}',
                   status TEXT NOT NULL DEFAULT 'active',
                   superseded_by TEXT,
                   stale_reason TEXT,
@@ -153,6 +154,7 @@ class ContinuityStore:
                     "superseded_by": "TEXT",
                     "stale_reason": "TEXT",
                     "archived_at": "TEXT",
+                    "quality_json": "TEXT NOT NULL DEFAULT '{}'",
                 },
             )
             conn.execute(
@@ -216,8 +218,8 @@ class ContinuityStore:
                   title, summary, details, tags_json, entities_json, sources_json,
                   confidence, importance, trust_level, created_at, updated_at,
                   last_accessed_at, last_confirmed_at, expires_at, source_hash,
-                  embedding_text, status, superseded_by, stale_reason, archived_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                  embedding_text, quality_json, status, superseded_by, stale_reason, archived_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                   kind=excluded.kind,
                   scope_user=excluded.scope_user,
@@ -240,6 +242,7 @@ class ContinuityStore:
                   expires_at=excluded.expires_at,
                   source_hash=excluded.source_hash,
                   embedding_text=excluded.embedding_text,
+                  quality_json=excluded.quality_json,
                   status=excluded.status,
                   superseded_by=excluded.superseded_by,
                   stale_reason=excluded.stale_reason,
@@ -248,7 +251,7 @@ class ContinuityStore:
                 _record_row(record),
             )
             self._replace_fts_row(conn, record)
-        if create_associations:
+        if create_associations and _record_allows_association_edges(record):
             self._create_candidate_association_edges(
                 record,
                 existing_records,
@@ -547,7 +550,7 @@ class ContinuityStore:
 
         stats = CorpusTermStats.from_records([record, *existing_records])
         for other in existing_records:
-            if other.id == record.id:
+            if other.id == record.id or not _record_allows_association_edges(other):
                 continue
             strength, edge_type = association_strength(record, other, stats=stats)
             if strength >= threshold:
@@ -578,6 +581,32 @@ class ContinuityStore:
                     """,
                     (row["memory_id_a"], row["memory_id_b"]),
                 )
+
+    def list_quality_inventory(self, *, limit: int = 100) -> list[dict[str, object]]:
+        """Return records with write-time quality warnings or review requirements."""
+        rows: list[dict[str, object]] = []
+        for record in self.list_records():
+            quality = record.quality or {}
+            warnings = quality.get("warnings", [])
+            review_required = bool(quality.get("review_required"))
+            if not warnings and not review_required:
+                continue
+            rows.append(
+                {
+                    "id": record.id,
+                    "kind": record.kind,
+                    "title": record.title,
+                    "status": record.status,
+                    "trust_level": record.trust_level,
+                    "scope_project": record.scope_project,
+                    "warnings": list(warnings) if isinstance(warnings, list) else [],
+                    "review_required": review_required,
+                    "score": float(quality.get("score", 1.0) or 0.0),
+                    "updated_at": record.updated_at,
+                }
+            )
+        rows.sort(key=lambda item: (float(item["score"]), str(item["updated_at"])), reverse=False)
+        return rows[: max(1, int(limit))]
 
     def upsert_vector(
         self,
@@ -793,6 +822,7 @@ def _record_row(record: ContextRecord) -> tuple[object, ...]:
         record.expires_at,
         record.source_hash,
         record.embedding_text,
+        json.dumps(record.quality, ensure_ascii=False),
         record.status,
         record.superseded_by,
         record.stale_reason,
@@ -827,12 +857,29 @@ def _record_from_row(row: sqlite3.Row) -> ContextRecord:
             "expires_at": row["expires_at"],
             "source_hash": row["source_hash"],
             "embedding_text": row["embedding_text"],
+            "quality": _json_object(row["quality_json"]),
             "status": row["status"],
             "superseded_by": row["superseded_by"],
             "stale_reason": row["stale_reason"],
             "archived_at": row["archived_at"],
         }
     )
+
+
+def _json_object(value: object) -> dict[str, object]:
+    if value is None:
+        return {}
+    try:
+        parsed = json.loads(str(value))
+    except json.JSONDecodeError:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _record_allows_association_edges(record: ContextRecord) -> bool:
+    from .record_quality import record_allows_association_edges
+
+    return record_allows_association_edges(record)
 
 
 def _skill_link_row(link: SkillLink) -> tuple[object, ...]:

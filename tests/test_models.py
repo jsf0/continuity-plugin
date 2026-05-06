@@ -57,3 +57,26 @@ def test_context_record_rejects_confidence_out_of_range(value: float) -> None:
             summary="s",
             confidence=value,
         )
+
+
+def test_context_record_round_trips_quality_metadata_without_embedding_pollution() -> None:
+    record = ContextRecord.new(
+        id="r_quality_meta",
+        kind="project_convention",
+        title="Quality metadata test",
+        summary="Quality metadata is stored separately from embedding text.",
+        tags=["quality"],
+        entities=["quality metadata"],
+        trust_level="explicit_user",
+        quality={"warnings": ["sparse_metadata"], "score": 0.76, "facets": ["software_project"]},
+    )
+
+    payload = record.to_dict()
+    restored = ContextRecord.from_dict(payload)
+
+    assert restored.quality == {
+        "warnings": ["sparse_metadata"],
+        "score": 0.76,
+        "facets": ["software_project"],
+    }
+    assert "sparse_metadata" not in (restored.embedding_text or "")

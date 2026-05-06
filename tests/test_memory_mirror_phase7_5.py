@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 from continuity import ContinuityProvider
+from continuity.memory_mirror import build_mirrored_memory_record
 
 
 def initialized_provider(
@@ -135,3 +136,18 @@ def test_on_memory_write_indexes_vectors_when_enabled(tmp_path: Path, monkeypatc
     )
     assert payload["results"][0]["id"].startswith("mirror_memory_")
     assert "vector" in payload["results"][0]["reasons"]
+
+
+def test_mirrored_memory_record_includes_quality_metadata() -> None:
+    record = build_mirrored_memory_record(
+        action="add",
+        target="memory",
+        content="guard-proxy uses tag:rust and cargo check before release.",
+        scope_project="guard-proxy",
+    )
+
+    assert record is not None
+    assert "rust" in record.tags
+    assert "guard-proxy" in record.entities
+    assert record.quality["score"] <= 1.0
+    assert "warnings" in record.quality

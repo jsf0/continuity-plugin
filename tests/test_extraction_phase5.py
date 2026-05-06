@@ -82,3 +82,23 @@ def test_extracts_markers_only_at_line_start() -> None:
     assert len(records) == 1
     assert records[0].kind == "lesson_learned"
     assert records[0].summary == "retry transient vector backend initialization once."
+
+
+def test_session_extraction_uses_shared_metadata_quality() -> None:
+    records = extract_records_from_messages(
+        session_id="s1",
+        messages=[
+            {
+                "role": "assistant",
+                "content": "Lesson learned: OpenBSD guard-proxy debugging uses tag:openbsd and rcctl logs.",
+            }
+        ],
+        scope_project="guard-proxy",
+    )
+
+    assert len(records) == 1
+    record = records[0]
+    assert "openbsd" in record.tags
+    assert "OpenBSD" in record.entities
+    assert "guard-proxy" in record.entities
+    assert record.quality["score"] <= 1.0

@@ -62,6 +62,10 @@ class CandidateQualityGate:
             warnings.append("summary_repeats_title")
         if len(summary_tokens) < 8 and not candidate.tags and not candidate.entities:
             warnings.append("low_information_candidate")
+        if not candidate.tags and not candidate.entities:
+            warnings.append("sparse_metadata")
+        elif not candidate.entities:
+            warnings.append("no_entities")
 
         unique_warnings = _unique(warnings)
         score = max(0.0, 1.0 - len(unique_warnings) * 0.18)

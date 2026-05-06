@@ -62,3 +62,21 @@ def test_quality_gate_rejects_too_short_low_information_candidate() -> None:
     assert not isinstance(result, CandidateRecord)
     assert "too_short_summary" in result.reasons
     assert "low_information_candidate" in result.reasons
+
+
+def test_quality_gate_warns_and_lowers_confidence_for_sparse_metadata_even_with_long_summary() -> (
+    None
+):
+    result = CandidateQualityGate().apply(
+        _candidate(
+            title="Deployment behavior",
+            summary="The deployment process restarts the service, verifies logs, checks health endpoints, and records any rollback decision in the release notes.",
+            tags=[],
+            entities=[],
+            confidence=0.86,
+        )
+    )
+
+    assert isinstance(result, CandidateRecord)
+    assert result.confidence <= 0.74
+    assert "sparse_metadata" in result.ingestion["quality"]["warnings"]

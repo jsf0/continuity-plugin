@@ -232,5 +232,7 @@ def test_cli_run_can_use_llm_command_extractor(tmp_path) -> None:
 
     assert exit_code == 0
     approved = read_jsonl(output_dir / "approved-records.jsonl")
-    assert approved[0]["title"] == "Use source refs"
-    assert approved[0]["source_refs"][0]["segment_id"] == "file://README.md#simple-corpus"
+    pending = read_jsonl(output_dir / "pending-records.jsonl")
+    assert pending[0]["title"] == "Use source refs"
+    assert approved == []
+    assert pending[0]["source_refs"][0]["segment_id"] == "file://README.md#simple-corpus"

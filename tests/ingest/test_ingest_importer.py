@@ -48,7 +48,8 @@ def test_candidate_to_context_record_preserves_core_fields_and_source_refs() -> 
     assert record.scope_project == candidate.scope_project
     assert record.scope_repo == candidate.scope_repo
     assert record.tags == candidate.tags
-    assert record.entities == candidate.entities
+    assert set(candidate.entities) <= set(record.entities)
+    assert "Extracted" in record.entities
     assert record.confidence == candidate.confidence
     assert record.importance == candidate.importance
     assert record.trust_level == "corpus_distilled"
