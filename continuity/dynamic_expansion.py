@@ -72,10 +72,11 @@ def propose_expansion_terms(
 
 
 def _candidate_has_anchor(candidate: object) -> bool:
-    return any(
-        float(getattr(candidate, attr, 0.0)) > 0
-        for attr in ("fts_score", "tag_score", "entity_score", "text_score")
-    )
+    # Dynamic expansion should come from structured metadata evidence, not mere
+    # body-text/FTS coincidences. Text-only expansion caused semantic drift on
+    # broad queries such as "what API framework should we use?" by harvesting
+    # unrelated entities from records that merely quoted similar words.
+    return any(float(getattr(candidate, attr, 0.0)) > 0 for attr in ("tag_score", "entity_score"))
 
 
 def _collect_record_terms(

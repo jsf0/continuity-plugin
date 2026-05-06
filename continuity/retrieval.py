@@ -482,6 +482,15 @@ class ContinuityRetriever:
                 candidate.rejected_reason = "facet_incompatible_candidate"
                 rejected.append(candidate)
                 continue
+            if candidate.record.kind == "active_project_state":
+                strong_tokens = expanded_tokens - WEAK_ANCHOR_TOKENS
+                metadata_tokens = _record_metadata_tokens(candidate.record) | _query_tokens(
+                    candidate.record.scope_project or ""
+                )
+                if strong_tokens and not (strong_tokens & metadata_tokens):
+                    candidate.rejected_reason = "weak_project_status_candidate"
+                    rejected.append(candidate)
+                    continue
             if personal_query and candidate.record.kind in PROJECT_STATUS_KINDS:
                 strong_tokens = expanded_tokens - WEAK_ANCHOR_TOKENS - {"personal"}
                 if not (strong_tokens & _record_anchor_tokens(candidate.record)):
@@ -925,7 +934,7 @@ def _facets_for_record(record: ContextRecord) -> set[str]:
     facets = _facets_for_tokens(tokens)
     if record.scope_project and record.scope_project not in GENERIC_PROJECT_SCOPES:
         facets |= _facets_for_tokens(_query_tokens(record.scope_project))
-    if record.kind in PROJECT_STATUS_KINDS:
+    if record.kind == "active_project_state":
         facets.add("software_project")
     return facets
 
