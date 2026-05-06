@@ -167,6 +167,72 @@ def test_cli_eval_runs_retrieval_eval_file(tmp_path) -> None:
     assert read_jsonl(report_path)[0]["passed"] is True
 
 
+def test_cli_validate_import_uses_temp_db_and_runs_retrieval_evals(tmp_path) -> None:
+    candidates_path = tmp_path / "approved-records.jsonl"
+    evals_path = tmp_path / "retrieval-evals.jsonl"
+    report_path = tmp_path / "temp-eval-report.jsonl"
+    candidate = _candidate()
+    write_jsonl(candidates_path, [candidate.to_dict()])
+    write_jsonl(
+        evals_path,
+        [
+            {
+                "eval_id": "eval_temp_import",
+                "query": "What should I know about CLI fixture?",
+                "expected_record_titles": [candidate.title],
+                "expected_tags": ["project-capsule"],
+                "forbidden_tags": ["unrelated-noise"],
+            }
+        ],
+    )
+
+    exit_code = main(
+        [
+            "validate-import",
+            str(candidates_path),
+            "--evals",
+            str(evals_path),
+            "--report",
+            str(report_path),
+        ]
+    )
+
+    assert exit_code == 0
+    assert read_jsonl(report_path)[0]["passed"] is True
+
+
+def test_cli_validate_import_returns_nonzero_when_temp_eval_fails(tmp_path) -> None:
+    candidates_path = tmp_path / "approved-records.jsonl"
+    evals_path = tmp_path / "retrieval-evals.jsonl"
+    report_path = tmp_path / "temp-eval-report.jsonl"
+    candidate = _candidate()
+    write_jsonl(candidates_path, [candidate.to_dict()])
+    write_jsonl(
+        evals_path,
+        [
+            {
+                "eval_id": "eval_temp_import_failure",
+                "query": "What should I know about CLI fixture?",
+                "expected_record_titles": ["Missing record title"],
+            }
+        ],
+    )
+
+    exit_code = main(
+        [
+            "validate-import",
+            str(candidates_path),
+            "--evals",
+            str(evals_path),
+            "--report",
+            str(report_path),
+        ]
+    )
+
+    assert exit_code == 1
+    assert read_jsonl(report_path)[0]["passed"] is False
+
+
 def test_cli_refresh_writes_refresh_artifacts(tmp_path) -> None:
     corpus = tmp_path / "corpus"
     shutil.copytree(FIXTURE_ROOT, corpus)

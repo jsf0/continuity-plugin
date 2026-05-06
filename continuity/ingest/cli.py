@@ -6,6 +6,7 @@ import argparse
 import json
 from collections.abc import Sequence
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 from continuity.ingest.eval import EvalRunner
 from continuity.ingest.importer import ContinuityImporter
@@ -24,8 +25,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     parser = _build_parser()
     args = parser.parse_args(argv)
-    args.func(args)
-    return 0
+    result = args.func(args)
+    return int(result or 0)
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -87,6 +88,15 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     eval_cmd.add_argument("--report")
     eval_cmd.set_defaults(func=_cmd_eval)
+
+    validate_import = subcommands.add_parser(
+        "validate-import",
+        help="Import approved records into a temporary DB and run retrieval evals",
+    )
+    validate_import.add_argument("approved_records")
+    validate_import.add_argument("--evals", required=True)
+    validate_import.add_argument("--report")
+    validate_import.set_defaults(func=_cmd_validate_import)
 
     refresh = subcommands.add_parser(
         "refresh", help="Compare a corpus scan with a previous inventory"
@@ -184,6 +194,31 @@ def _cmd_eval(args: argparse.Namespace) -> None:
             sort_keys=True,
         )
     )
+
+
+def _cmd_validate_import(args: argparse.Namespace) -> int:
+    candidates = [CandidateRecord.from_dict(row) for row in read_jsonl(args.approved_records)]
+    with TemporaryDirectory(prefix="continuity-ingest-validate-") as temp_dir:
+        db_path = Path(temp_dir) / "continuity.db"
+        store = ContinuityStore(db_path)
+        import_result = ContinuityImporter(store).import_records(candidates, dry_run=False)
+        eval_result = EvalRunner(store).run_file(args.evals, report_path=args.report)
+    print(
+        json.dumps(
+            {
+                "passed": eval_result.passed,
+                "total": eval_result.total,
+                "passed_count": eval_result.passed_count,
+                "failed_count": eval_result.failed_count,
+                "import_created": len(import_result.created),
+                "import_updated": len(import_result.updated),
+                "import_failed": len(import_result.failed),
+                "temporary_db": True,
+            },
+            sort_keys=True,
+        )
+    )
+    return 0 if eval_result.passed and not import_result.failed else 1
 
 
 def _cmd_refresh(args: argparse.Namespace) -> None:

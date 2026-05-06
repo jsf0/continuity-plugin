@@ -485,9 +485,10 @@ continuity-ingest import approved-records.jsonl --apply
 set -euo pipefail
 TMP_HOME="$(mktemp -d)"
 TMP_OUT="$(mktemp -d)"
-uv run continuity-ingest run tests/fixtures/ingestion/simple_docs --recipe docs --dry-run --output "$TMP_OUT"
-uv run continuity-ingest import "$TMP_OUT/approved-records.jsonl" --apply --home "$TMP_HOME"
-uv run continuity-ingest eval "$TMP_OUT/retrieval-evals.jsonl" --home "$TMP_HOME"
+uv run continuity-ingest run tests/fixtures/ingestion/simple_docs --recipe docs --include README.md --policy safe-auto --output "$TMP_OUT"
+uv run continuity-ingest validate-import "$TMP_OUT/approved-records.jsonl" --evals "$TMP_OUT/retrieval-evals.jsonl" --report "$TMP_OUT/temp-eval-report.jsonl"
+uv run continuity-ingest import "$TMP_OUT/approved-records.jsonl" --apply --db-path "$TMP_HOME/continuity.db"
+uv run continuity-ingest eval "$TMP_OUT/retrieval-evals.jsonl" --db-path "$TMP_HOME/continuity.db"
 ```
 
 **Acceptance:** A new user can run the smoke test without touching their real Hermes DB.
