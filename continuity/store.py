@@ -476,7 +476,7 @@ class ContinuityStore:
                 _record_row(record),
             )
             self._replace_fts_row(conn, record)
-        if create_associations and _record_allows_association_edges(record):
+        if create_associations:
             self._create_candidate_association_edges(
                 record,
                 existing_records,
@@ -775,9 +775,13 @@ class ContinuityStore:
 
         stats = CorpusTermStats.from_records([record, *existing_records])
         for other in existing_records:
-            if other.id == record.id or not _record_allows_association_edges(other):
+            if other.id == record.id:
                 continue
             strength, edge_type = association_strength(record, other, stats=stats)
+            if edge_type != "source_reference" and not (
+                _record_allows_association_edges(record) and _record_allows_association_edges(other)
+            ):
+                continue
             if strength >= threshold:
                 self.upsert_association_edge(
                     record.id,

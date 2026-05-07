@@ -157,10 +157,18 @@ def test_importer_builds_source_reference_association_edges(tmp_path) -> None:
                     "section": "DESCRIPTION",
                 }
             ],
+            "ingestion": {
+                "context": {
+                    "labels": {"os": "openbsd", "command": "ldom.conf", "manual_section": "5"},
+                    "partition_keys": ["os"],
+                    "identity_keys": ["command", "manual_section"],
+                    "collision_risk": "high",
+                }
+            },
         }
     )
 
-    result = importer.import_records([ldomctl, ldom_conf], dry_run=False)
+    result = importer.import_records([ldom_conf, ldomctl], dry_run=False)
 
     assert result.failed == []
     assert len(result.created) == 2

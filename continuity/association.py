@@ -179,10 +179,13 @@ def _outbound_reference_targets(record: ContextRecord) -> set[str]:
                 continue
             target = normalize_phrase(str(reference.get("target") or ""))
             raw = normalize_phrase(str(reference.get("raw") or ""))
-            if target:
-                targets.add(target)
+            section = normalize_phrase(str(reference.get("section") or ""))
             if raw:
                 targets.add(raw)
+            elif target:
+                targets.add(target)
+            if target and section:
+                targets.add(f"{target} {section}")
     return targets
 
 
@@ -191,6 +194,7 @@ def _record_identity_terms(record: ContextRecord, entities: set[str]) -> set[str
     title = normalize_phrase(record.title)
     if title:
         terms.add(title)
+    context_values: dict[str, str] = {}
     for source in record.sources:
         metadata = source.metadata or {}
         context = metadata.get("context")
@@ -199,18 +203,24 @@ def _record_identity_terms(record: ContextRecord, entities: set[str]) -> set[str
         labels = context.get("labels")
         if not isinstance(labels, dict):
             continue
-        for value in labels.values():
+        for key, value in labels.items():
             label = normalize_phrase(str(value or ""))
             if label:
                 terms.add(label)
+                context_values[normalize_phrase(str(key or ""))] = label
     quality_context = record.quality.get("context") if isinstance(record.quality, dict) else None
     if isinstance(quality_context, dict):
         labels = quality_context.get("labels")
         if isinstance(labels, dict):
-            for value in labels.values():
+            for key, value in labels.items():
                 label = normalize_phrase(str(value or ""))
                 if label:
                     terms.add(label)
+                    context_values[normalize_phrase(str(key or ""))] = label
+    command = context_values.get("command")
+    manual_section = context_values.get("manual_section") or context_values.get("manual section")
+    if command and manual_section:
+        terms.add(f"{command} {manual_section}")
     return terms
 
 
