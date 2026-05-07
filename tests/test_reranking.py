@@ -61,6 +61,43 @@ def _record(record_id, summary, *, tags=None, entities=None):
     )
 
 
+class LowInformationVectorBackend:
+    def is_available(self):
+        return True
+
+    def upsert(self, record_id, text):
+        pass
+
+    def delete(self, record_id):
+        pass
+
+    def search(self, query, limit):
+        from continuity.embeddings import VectorHit
+
+        return [VectorHit("guard_proxy", 0.92)][:limit]
+
+
+def test_low_information_followup_rejects_vector_only_mirrors(tmp_path):
+    store = ContinuityStore(tmp_path / "continuity.db")
+    store.migrate()
+    store.upsert_record(
+        _record(
+            "guard_proxy",
+            "guard-proxy current status after SPKI docs cleanup. Can you test and see if it's better now?",
+            tags=["guard-proxy"],
+            entities=["guard-proxy"],
+        )
+    )
+
+    hits = ContinuityRetriever(
+        store,
+        vector_backend=LowInformationVectorBackend(),
+        association_enabled=True,
+    ).search("continue and check if it's better now", limit=5)
+
+    assert hits == []
+
+
 def test_reranker_can_reject_weak_generic_query_candidates(tmp_path):
     store = ContinuityStore(tmp_path / "continuity.db")
     store.migrate()

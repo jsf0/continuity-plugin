@@ -17,6 +17,7 @@ class PinnedSystemPromptConfig:
     """Configuration for continuity records pinned into the system prompt."""
 
     enabled: bool = True
+    include_records: bool = True
     max_chars: int = 1200
     max_records: int = 5
     kinds: tuple[str, ...] = ("user_preference", "project_convention")
@@ -172,8 +173,9 @@ class ContinuityConfig:
             ),
             pinned_system_prompt=PinnedSystemPromptConfig(
                 enabled=_bool(pinned.get("enabled"), True),
+                include_records=_bool(pinned.get("include_records"), True),
                 max_chars=max(200, _int(pinned.get("max_chars"), 1200)),
-                max_records=max(1, _int(pinned.get("max_records"), 5)),
+                max_records=max(0, _int(pinned.get("max_records"), 5)),
                 kinds=tuple(_string_list(pinned.get("kinds")))
                 or ("user_preference", "project_convention"),
                 min_importance=min(1.0, max(0.0, _float(pinned.get("min_importance"), 0.75))),

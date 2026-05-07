@@ -955,6 +955,18 @@ class ContinuityStore:
             ).fetchone()
         return dict(row) if row else None
 
+    def list_retrieval_events(self, *, limit: int = 10) -> list[dict[str, object]]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM retrieval_events
+                ORDER BY created_at DESC, rowid DESC
+                LIMIT ?
+                """,
+                (max(1, min(100, int(limit))),),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
     def add_session_observation(
         self,
         *,

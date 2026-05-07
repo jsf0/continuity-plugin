@@ -91,11 +91,51 @@ def test_system_prompt_block_includes_continuity_guidance_when_pinning_disabled(
     block = provider.system_prompt_block()
 
     assert "CONTINUITY MEMORY PROVIDER" in block
-    assert "Use the memory tool more readily" in block
-    assert "retrieved records are advisory background" in block
-    assert "continuity_debug_retrieval" in block
-    assert "continuity_hydrate" in block
-    assert "hydrated source text" in block
+    assert "Routine memory writes: use the memory tool" in block
+    assert "Routine memory recall: read any provided <memory-context> first" in block
+    assert "use continuity_status, continuity_search, or continuity_debug_retrieval" in block
+    assert "When asked whether continuity helped" in block
+    assert "inspect recent retrieval events" in block
+    assert "Do not retrieve against quoted prior assistant text" in block
+    assert "empty or noisy retrieval is not proof of absence" in block
+    assert "try both 'ldomctl' and 'ldomctl OpenBSD logical domains'" in block
+    assert "continuity_hydrate takes a continuity record id" in block
+    assert "not a corpus segment id such as 'seg_...'" in block
+    assert "continuity_hydrate before claiming the source is absent" in block
+    assert "use continuity_debug_retrieval to inspect selected/rejected" in block
+    assert "do not load the hermes-continuity-memory skill for ordinary memory recall" in block
+
+
+def test_system_prompt_block_guidance_only_mode_omits_record_summaries(tmp_path: Path) -> None:
+    provider = ContinuityProvider()
+    provider.initialize(
+        session_id="guidance-only-phase9",
+        hermes_home=str(tmp_path),
+        continuity_config={
+            "pinned_system_prompt": {
+                "enabled": True,
+                "include_records": False,
+            }
+        },
+    )
+    assert provider._store is not None
+    provider._store.upsert_record(
+        ContextRecord.new(
+            id="r_private_pref",
+            kind="user_preference",
+            title="Private preference",
+            summary="This durable preference must not appear in guidance-only mode.",
+            importance=1.0,
+            confidence=1.0,
+            trust_level="explicit_user",
+        )
+    )
+
+    block = provider.system_prompt_block()
+
+    assert "CONTINUITY MEMORY PROVIDER" in block
+    assert "CONTINUITY PINNED MEMORY" not in block
+    assert "This durable preference must not appear" not in block
 
 
 def test_system_prompt_block_skips_archived_records(tmp_path: Path) -> None:
@@ -131,10 +171,17 @@ def test_continuity_status_reports_pinned_prompt_config(tmp_path: Path) -> None:
     provider.initialize(
         session_id="pinned-phase9",
         hermes_home=str(tmp_path),
-        continuity_config={"pinned_system_prompt": {"enabled": True, "max_chars": 777}},
+        continuity_config={
+            "pinned_system_prompt": {
+                "enabled": True,
+                "include_records": False,
+                "max_chars": 777,
+            }
+        },
     )
 
     status = json.loads(provider.handle_tool_call("continuity_status", {}))
 
     assert status["pinned_system_prompt_enabled"] is True
+    assert status["pinned_system_prompt_include_records"] is False
     assert status["pinned_system_prompt_max_chars"] == 777

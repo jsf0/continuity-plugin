@@ -57,6 +57,22 @@ def test_config_parses_sentence_transformers_vector_backend() -> None:
     assert config.pinned_system_prompt.enabled is True
 
 
+def test_config_parses_guidance_only_pinned_system_prompt() -> None:
+    config = ContinuityConfig.from_mapping(
+        {
+            "pinned_system_prompt": {
+                "enabled": True,
+                "include_records": False,
+                "max_records": 0,
+            }
+        }
+    )
+
+    assert config.pinned_system_prompt.enabled is True
+    assert config.pinned_system_prompt.include_records is False
+    assert config.pinned_system_prompt.max_records == 0
+
+
 def test_config_parses_retrieval_gate_tunables() -> None:
     config = ContinuityConfig.from_mapping(
         {

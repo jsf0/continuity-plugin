@@ -103,6 +103,88 @@ def _store(tmp_path: Path) -> ContinuityStore:
     return store
 
 
+def _openbsd_context(command: str, *, section: str = "8") -> dict[str, object]:
+    return {
+        "context": {
+            "labels": {"command": command, "manual_section": section, "os": "openbsd"},
+            "partition_keys": ["os"],
+            "identity_keys": ["command", "manual_section"],
+            "collision_risk": "high",
+        }
+    }
+
+
+def _openbsd_record(
+    record_id: str,
+    command: str,
+    section_title: str,
+    summary: str,
+    *,
+    kind: str = "codebase_fact",
+) -> ContextRecord:
+    return ContextRecord.new(
+        id=record_id,
+        kind=kind,
+        title=f"Manpage {section_title}: {command}",
+        summary=summary,
+        tags=["manpage", "manual-section", section_title.lower()],
+        entities=[command, "OpenBSD", f"{command}.8", section_title],
+        confidence=0.82,
+        importance=0.62,
+        trust_level="corpus_distilled",
+        quality=_openbsd_context(command),
+    )
+
+
+def _openbsd_store(tmp_path: Path) -> ContinuityStore:
+    store = ContinuityStore(tmp_path / "openbsd-regression.db")
+    store.migrate()
+    records = [
+        _openbsd_record(
+            "ldapd_name",
+            "ldapd",
+            "NAME",
+            "NAME ldapd — Lightweight Directory Access Protocol (LDAP) daemon",
+            kind="glossary_term",
+        ),
+        _openbsd_record(
+            "ldapd_description",
+            "ldapd",
+            "DESCRIPTION",
+            "DESCRIPTION ldapd implements version 3 of the LDAP protocol and is controlled using ldapctl(8).",
+        ),
+        _openbsd_record(
+            "ldapd_files",
+            "ldapd",
+            "FILES",
+            "FILES /etc/ldapd.conf default ldapd configuration file /var/run/ldapd.sock control socket",
+        ),
+        _openbsd_record(
+            "ypldap_description",
+            "ypldap",
+            "DESCRIPTION",
+            "DESCRIPTION ypldap provides YP maps using LDAP as a backend for RFC 2307 schemas.",
+        ),
+        _openbsd_record(
+            "spamdb_description",
+            "spamdb",
+            "DESCRIPTION",
+            "DESCRIPTION spamdb manipulates the spamd database used by spamd(8).",
+        ),
+        _record(
+            "continuity_release_status",
+            "Continuity plugin public release readiness checkpoint",
+            "Hermes continuity plugin release status, retrieval gates, and release hygiene checks.",
+            tags=["continuity", "retrieval", "release"],
+            entities=["hermes-continuity-memory", "continuity plugin"],
+            kind="active_project_state",
+        ),
+    ]
+    for record in records:
+        store.upsert_record(record)
+    return store
+
+
 RETRIEVAL_REGRESSION_CASES = [
     pytest.param(
         "how much camper can I pull?",
@@ -228,6 +310,88 @@ def test_memory_meta_query_retrieves_memory_system_record(tmp_path: Path) -> Non
     )
 
     assert [hit.record.id for hit in hits][:1] == ["memory_context"]
+
+
+def test_exact_command_query_recovers_high_collision_corpus_records(tmp_path: Path) -> None:
+    hits = ContinuityRetriever(_openbsd_store(tmp_path), association_enabled=False).search(
+        "ldapd", limit=5
+    )
+
+    hit_ids = {hit.record.id for hit in hits}
+    assert {"ldapd_name", "ldapd_description", "ldapd_files"} <= hit_ids
+    assert "spamdb_description" not in hit_ids
+
+
+def test_openbsd_ldap_sshd_query_prefers_domain_records_over_memory_project_status(
+    tmp_path: Path,
+) -> None:
+    hits = ContinuityRetriever(_openbsd_store(tmp_path), association_enabled=False).search(
+        "how do i configure OpenBSD to use ldapd with sshd sessions", limit=5
+    )
+
+    hit_ids = {hit.record.id for hit in hits}
+    assert {"ldapd_description", "ypldap_description"} & hit_ids
+    assert "continuity_release_status" not in hit_ids
+
+
+def test_exact_context_identifier_records_survive_cold_reranker(tmp_path: Path) -> None:
+    hits = ContinuityRetriever(
+        _openbsd_store(tmp_path),
+        association_enabled=False,
+        reranker_backend=RejectingReranker(),
+        reranker_min_score=0.15,
+    ).search("how do i configure OpenBSD to use ldapd with sshd sessions", limit=5)
+
+    hit_ids = {hit.record.id for hit in hits}
+    assert {"ldapd_name", "ldapd_description", "ldapd_files"} <= hit_ids
+    assert "spamdb_description" not in hit_ids
+
+
+def test_retrieval_helpfulness_meta_query_does_not_inject_project_status_records(
+    tmp_path: Path,
+) -> None:
+    hits = ContinuityRetriever(_openbsd_store(tmp_path), association_enabled=False).search(
+        "did continuity plugin help with this query", limit=5
+    )
+
+    assert [hit.record.id for hit in hits] == []
+
+
+def test_retrieval_helpfulness_meta_query_does_not_graph_expand_old_memory_work(
+    tmp_path: Path,
+) -> None:
+    store = ContinuityStore(tmp_path / "helpfulness-graph.db")
+    store.migrate()
+    seed = _record(
+        "retrieval_hydration_note",
+        "Continuity retrieval hydration note",
+        "Continuity retrieval source hydration note for corpus-backed records.",
+        tags=["continuity", "retrieval"],
+        entities=["continuity plugin", "retrieval"],
+        kind="codebase_fact",
+    )
+    status = _record(
+        "retrieval_release_status",
+        "Continuity plugin release status",
+        "Continuity plugin release status and retrieval gate tuning checkpoint.",
+        tags=["continuity", "retrieval", "release"],
+        entities=["continuity plugin", "retrieval_gates"],
+        kind="active_project_state",
+    )
+    store.upsert_record(seed)
+    store.upsert_record(status)
+    store.upsert_association_edge(
+        seed.id,
+        status.id,
+        strength=0.95,
+        edge_type="entity_overlap",
+    )
+
+    hits = ContinuityRetriever(store, association_enabled=True).search(
+        "did continuity plugin help with this query", limit=5
+    )
+
+    assert hits == []
 
 
 def _single_record_store(tmp_path: Path, *records: ContextRecord) -> ContinuityStore:

@@ -34,6 +34,7 @@ def test_phase4_provider_exposes_search_get_add_delete_status_tools() -> None:
         "continuity_restore",
         "continuity_prune_stale",
         "continuity_debug_retrieval",
+        "continuity_recent_retrievals",
         "continuity_association_edges",
         "continuity_reindex_vectors",
         "continuity_dream",

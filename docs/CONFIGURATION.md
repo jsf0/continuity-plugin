@@ -64,6 +64,7 @@ memory:
 
     pinned_system_prompt:
       enabled: true
+      include_records: true
       max_chars: 1200
       max_records: 5
       kinds: [user_preference, project_convention]
@@ -475,11 +476,17 @@ uv run pytest tests/test_retrieval.py tests/test_retrieval_public_regressions.py
 
 ## Pinned system prompt options
 
-The provider always returns a compact continuity guidance block from `system_prompt_block()` when initialized. Pinned records are enabled by default as the Tier 0 memory layer; disable them explicitly if you want retrieval-only continuity.
+The provider always returns a compact continuity guidance block from `system_prompt_block()` when initialized. Pinned records are enabled by default as the Tier 0 memory layer. For small/local models that need continuity operating guidance but should not receive any always-on memory summaries, set `pinned_system_prompt.enabled: true` and `pinned_system_prompt.include_records: false`.
 
 ### `pinned_system_prompt.enabled`
 
-Whether high-importance continuity records are included in the system prompt at session start.
+Whether the pinned system-prompt feature is enabled. The compact continuity operating guidance remains available when the provider is initialized; record summaries are controlled separately by `include_records`.
+
+Default: `true`.
+
+### `pinned_system_prompt.include_records`
+
+Whether high-importance continuity records are included after the guidance block. Set this to `false` for guidance-only mode: the model learns how to use continuity, but no durable memory summaries are injected into the system prompt.
 
 Default: `true`.
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import uuid
 from typing import Any
 
@@ -59,6 +60,22 @@ CONTINUITY_GET_SCHEMA: dict[str, object] = {
         "type": "object",
         "properties": {"id": {"type": "string", "description": "Record id."}},
         "required": ["id"],
+    },
+}
+
+CONTINUITY_RECENT_RETRIEVALS_SCHEMA: dict[str, object] = {
+    "name": "continuity_recent_retrievals",
+    "description": (
+        "Inspect recent continuity retrieval events, including original queries, "
+        "selected/skipped record ids, and scores. Use this to answer whether "
+        "continuity helped a previous query."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "limit": {"type": "integer", "description": "Maximum recent events to return."}
+        },
+        "required": [],
     },
 }
 
@@ -286,6 +303,7 @@ ALL_TOOL_SCHEMAS = [
     CONTINUITY_STATUS_SCHEMA,
     CONTINUITY_SEARCH_SCHEMA,
     CONTINUITY_GET_SCHEMA,
+    CONTINUITY_RECENT_RETRIEVALS_SCHEMA,
     CONTINUITY_HYDRATE_SCHEMA,
     CONTINUITY_ADD_SCHEMA,
     CONTINUITY_DELETE_SCHEMA,
@@ -362,6 +380,48 @@ def handle_get(store: ContinuityStore, args: dict[str, Any]) -> dict[str, object
         "record": record.to_dict(),
         "skill_links": [link.to_dict() for link in store.list_skill_links(record.id)],
     }
+
+
+def handle_recent_retrievals(store: ContinuityStore, args: dict[str, Any]) -> dict[str, object]:
+    limit = _bounded_int(args.get("limit"), default=10, minimum=1, maximum=100)
+    return {
+        "success": True,
+        "events": [
+            _retrieval_event_to_dict(row) for row in store.list_retrieval_events(limit=limit)
+        ],
+    }
+
+
+def _retrieval_event_to_dict(row: dict[str, object]) -> dict[str, object]:
+    return {
+        "id": row.get("id"),
+        "query": row.get("query"),
+        "selected_ids": _json_list(row.get("selected_ids_json")),
+        "skipped_ids": _json_list(row.get("skipped_ids_json")),
+        "scores": _json_dict(row.get("scores_json")),
+        "max_chars": row.get("max_chars"),
+        "created_at": row.get("created_at"),
+    }
+
+
+def _json_list(value: object) -> list[object]:
+    if not isinstance(value, str):
+        return []
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError:
+        return []
+    return parsed if isinstance(parsed, list) else []
+
+
+def _json_dict(value: object) -> dict[str, object]:
+    if not isinstance(value, str):
+        return {}
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
 
 
 def handle_hydrate(store: ContinuityStore, args: dict[str, Any]) -> dict[str, object]:

@@ -125,9 +125,11 @@ memory:
       activation_anchor: true
       strong_personal_anchor_reranker_bypass: true
 
-    # Tier 0 memory: tiny, high-trust continuity records pinned every turn.
+    # Continuity guidance plus optional Tier 0 records.
+    # Set include_records: false for guidance-only mode with no memory summaries.
     pinned_system_prompt:
       enabled: true
+      include_records: true
       max_chars: 1200
       max_records: 6
 

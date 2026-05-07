@@ -144,12 +144,15 @@ WEAK_ANCHOR_TOKENS = (
     | LOW_INFORMATION_ACTIVATION_TOKENS
     | frozenset(
         {
+            "check",
             "cleanup",
+            "continue",
             "current",
             "done",
             "issue",
             "problem",
             "project",
+            "s",
             "state",
             "statu",
             "status",
@@ -183,6 +186,10 @@ MEMORY_META_GENERIC_TOKENS = frozenset({"memory", "record"})
 MEMORY_META_ACTION_TOKENS = frozenset({"issue", "link", "noise", "retrieval"})
 MEMORY_META_RECORD_ANCHORS = MEMORY_META_INTENT_TOKENS | frozenset(
     {"memory-system", "memory-provider"}
+)
+RETRIEVAL_HELPFULNESS_TOKENS = frozenset({"help", "helpful", "useful"})
+RETRIEVAL_HELPFULNESS_CONTEXT_TOKENS = frozenset(
+    {"query", "answer", "response", "previous", "prior", "this"}
 )
 
 PREFERENCE_QUERY_TOKENS = frozenset(
@@ -400,6 +407,28 @@ class ContinuityRetriever:
         personal_query = bool(raw_tokens & PERSONAL_QUERY_RAW_TERMS)
         preference_query = _is_preference_query(expanded_tokens, personal_query=personal_query)
         memory_meta_query = _is_memory_meta_query(expanded_tokens)
+        retrieval_helpfulness_meta_query = _is_retrieval_helpfulness_meta_query(raw_tokens)
+        if retrieval_helpfulness_meta_query:
+            return {
+                "query": query,
+                "query_context": context_to_mapping(effective_query_context),
+                "comparison_intent": effective_comparison_intent,
+                "tokens": sorted(tokens),
+                "expanded_tokens": sorted(expanded_tokens),
+                "dynamic_expansion": [],
+                "selected": [],
+                "rejected": [],
+                "activation_trace": {
+                    "direct_seeds": [],
+                    "activation_seeds": [],
+                    "edges_fired": [],
+                    "included_neighbors": [],
+                    "cut_neighbors": [],
+                },
+            }
+        exact_context_bypass_ids = _exact_context_partition_bypass_record_ids(
+            self.store.list_records(), raw_tokens, include_stale=include_stale
+        )
         query_facets = _facets_for_tokens(expanded_tokens)
         candidates: dict[str, CandidateScore] = {}
         effective_scope = str(scope_project) if scope_project else None
@@ -434,6 +463,7 @@ class ContinuityRetriever:
                 continue
             candidate = candidates.setdefault(record.id, CandidateScore(record))
             _apply_metadata_score(candidate, expanded_tokens)
+            _apply_exact_identifier_score(candidate, raw_tokens)
             if candidate.base_relevance <= 0:
                 candidates.pop(record.id, None)
                 continue
@@ -479,6 +509,7 @@ class ContinuityRetriever:
                 candidate = candidates.setdefault(record.id, CandidateScore(record))
                 before = candidate.base_relevance
                 _apply_metadata_score(candidate, new_tokens)
+                _apply_exact_identifier_score(candidate, raw_tokens)
                 if before <= 0 and candidate.base_relevance <= 0:
                     candidates.pop(record.id, None)
                     continue
@@ -498,6 +529,14 @@ class ContinuityRetriever:
                 continue
             _apply_scope_score(candidate, expanded_tokens, effective_scope)
             _apply_boosts_and_penalties(candidate, personal_query=personal_query)
+            if (
+                self.gate_config.memory_meta
+                and retrieval_helpfulness_meta_query
+                and candidate.record.kind in PROJECT_STATUS_KINDS
+            ):
+                candidate.rejected_reason = "retrieval_helpfulness_meta_query_requires_events"
+                rejected.append(candidate)
+                continue
             if (
                 self.gate_config.memory_meta
                 and memory_meta_query
@@ -567,6 +606,7 @@ class ContinuityRetriever:
                 candidate,
                 effective_query_context,
                 comparison_intent=effective_comparison_intent,
+                allow_missing_partition=candidate.record.id in exact_context_bypass_ids,
             ):
                 rejected.append(candidate)
                 continue
@@ -632,6 +672,9 @@ class ContinuityRetriever:
             candidate.reranker_boost = candidate.reranker_score * self.reranker_weight
             candidate.reasons.append("reranker")
             if candidate.reranker_score < self.reranker_min_score:
+                if _reranker_rejection_overridden_by_exact_context_identifier(candidate):
+                    candidate.reasons.append("exact_context_identifier_reranker_bypass")
+                    continue
                 if (
                     self.gate_config.strong_personal_anchor_reranker_bypass
                     and _reranker_rejection_overridden_by_strong_personal_anchor(candidate)
@@ -893,11 +936,13 @@ def _apply_context_compatibility(
     query_context: ContextLabelSet,
     *,
     comparison_intent: bool,
+    allow_missing_partition: bool = False,
 ) -> bool:
     compatibility = compare_contexts(
         query_context,
         context_from_record(candidate.record),
         comparison_intent=comparison_intent,
+        allow_missing_partition=allow_missing_partition,
     )
     candidate.metadata_boost += compatibility.score_adjustment
     for reason in compatibility.reasons:
@@ -1068,6 +1113,22 @@ def _record_metadata_tokens(record: ContextRecord) -> set[str]:
         if normalized:
             tokens.add(normalized)
     return tokens
+
+
+def _reranker_rejection_overridden_by_exact_context_identifier(candidate: CandidateScore) -> bool:
+    """Preserve exact context-label hits when a generic reranker underscores them.
+
+    Section-like corpus records can be terse, so a cross-encoder may score some
+    exact command/manpage chunks below threshold even though context labels prove
+    they are the requested identifier.  Keep only strong exact context matches;
+    ambiguous text/entity hits still obey the reranker.
+    """
+
+    return (
+        "exact_context_identifier" in candidate.reasons
+        and "context_label_match:command" in candidate.reasons
+        and candidate.entity_score >= ENTITY_BONUS
+    )
 
 
 def _reranker_rejection_overridden_by_strong_personal_anchor(
@@ -1301,6 +1362,106 @@ def _apply_metadata_score(candidate: CandidateScore, tokens: set[str]) -> None:
         candidate.reasons.append("text")
 
 
+def _apply_exact_identifier_score(candidate: CandidateScore, raw_tokens: set[str]) -> None:
+    """Boost exact command/path/API-style identifiers even in high-collision corpora."""
+
+    identifiers = _exact_identifier_tokens(raw_tokens)
+    if not identifiers:
+        return
+    record = candidate.record
+    context = context_from_record(record)
+    context_values = {_normalize_token(value) for value in context.labels.values()}
+    exact_context = identifiers & context_values
+    identifier_like = {token for token in identifiers if _is_identifier_like_token(token)}
+    exact_metadata = exact_context | (identifier_like & _record_identifier_tokens(record))
+    if not exact_metadata:
+        return
+    candidate.entity_score += ENTITY_BONUS * len(exact_metadata)
+    candidate.metadata_boost += 1.0
+    if "exact_identifier" not in candidate.reasons:
+        candidate.reasons.append("exact_identifier")
+    if exact_context and "exact_context_identifier" not in candidate.reasons:
+        candidate.reasons.append("exact_context_identifier")
+
+
+def _exact_context_partition_bypass_record_ids(
+    records: list[ContextRecord], raw_tokens: set[str], *, include_stale: bool
+) -> set[str]:
+    """Return records whose exact context identifier safely implies the partition.
+
+    A literal command token like ``ldapd`` can safely imply ``os=openbsd`` when all
+    matching context-labeled records share the same partition values.  Ambiguous
+    tokens like ``ifconfig`` spanning OpenBSD and Linux must still require an
+    explicit partition.
+    """
+
+    identifiers = _exact_identifier_tokens(raw_tokens)
+    if not identifiers:
+        return set()
+    partition_signatures_by_token: dict[str, set[tuple[tuple[str, str], ...]]] = {}
+    matching_record_ids_by_token: dict[str, set[str]] = {}
+    for record in records:
+        if not include_stale and _is_inactive_or_expired(record):
+            continue
+        context = context_from_record(record)
+        if not context.labels:
+            continue
+        matched_tokens = identifiers & {
+            _normalize_token(value) for value in context.labels.values()
+        }
+        if not matched_tokens:
+            continue
+        signature = tuple(
+            sorted(
+                (key, context.labels[key])
+                for key in context.partition_keys
+                if key in context.labels
+            )
+        )
+        for token in matched_tokens:
+            partition_signatures_by_token.setdefault(token, set()).add(signature)
+            matching_record_ids_by_token.setdefault(token, set()).add(record.id)
+    allowed: set[str] = set()
+    for token, signatures in partition_signatures_by_token.items():
+        if len(signatures) == 1:
+            allowed.update(matching_record_ids_by_token.get(token, set()))
+    return allowed
+
+
+def _has_exact_identifier_match(candidate: CandidateScore) -> bool:
+    return "exact_identifier" in candidate.reasons
+
+
+def _exact_identifier_tokens(raw_tokens: set[str]) -> set[str]:
+    return {
+        token
+        for token in raw_tokens
+        if token
+        and token not in WEAK_ANCHOR_TOKENS
+        and token not in MEMORY_META_INTENT_TOKENS
+        and len(token) >= 2
+    }
+
+
+def _is_identifier_like_token(token: str) -> bool:
+    return any(char in token for char in (".", "_", "-", ":", "/")) or any(
+        char.isdigit() for char in token
+    )
+
+
+def _record_identifier_tokens(record: ContextRecord) -> set[str]:
+    tokens: set[str] = set()
+    for value in [record.title, *record.tags, *record.entities]:
+        normalized = _normalize_token(value)
+        if normalized:
+            tokens.add(normalized)
+        tokens.update(_query_tokens(value))
+    for source in record.sources:
+        if source.uri:
+            tokens.update(_query_tokens(source.uri))
+    return tokens
+
+
 def _is_weak_vector_only_candidate(
     candidate: CandidateScore, gate_config: RetrievalGateConfig
 ) -> bool:
@@ -1372,6 +1533,14 @@ def _is_memory_meta_query(tokens: set[str]) -> bool:
     if tokens & MEMORY_META_INTENT_TOKENS:
         return True
     return bool((tokens & MEMORY_META_GENERIC_TOKENS) and (tokens & MEMORY_META_ACTION_TOKENS))
+
+
+def _is_retrieval_helpfulness_meta_query(raw_tokens: set[str]) -> bool:
+    return bool(
+        raw_tokens & MEMORY_META_INTENT_TOKENS
+        and raw_tokens & RETRIEVAL_HELPFULNESS_TOKENS
+        and raw_tokens & RETRIEVAL_HELPFULNESS_CONTEXT_TOKENS
+    )
 
 
 def _memory_meta_record_allowed(
