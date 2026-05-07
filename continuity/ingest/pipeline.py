@@ -371,9 +371,38 @@ def _attach_context_to_segments(
     if not context_payload:
         return segments
     return [
-        replace(segment, metadata={**segment.metadata, "context": context_payload})
+        replace(
+            segment,
+            metadata={
+                **segment.metadata,
+                "context": _merge_context_payloads(context_payload, segment.metadata.get("context")),
+            },
+        )
         for segment in segments
     ]
+
+
+def _merge_context_payloads(
+    base: dict[str, object], overlay: object
+) -> dict[str, object]:
+    if not isinstance(overlay, dict):
+        return base
+    base_context = context_from_mapping(base)
+    overlay_context = context_from_mapping(overlay)
+    labels = {**base_context.labels, **overlay_context.labels}
+    return context_to_mapping(
+        ContextLabelSet(
+            labels=labels,
+            partition_keys=base_context.partition_keys | overlay_context.partition_keys,
+            soft_keys=base_context.soft_keys | overlay_context.soft_keys,
+            identity_keys=base_context.identity_keys | overlay_context.identity_keys,
+            collision_risk=(
+                "high"
+                if "high" in {base_context.collision_risk, overlay_context.collision_risk}
+                else "normal"
+            ),
+        )
+    )
 
 
 def _attach_context_to_candidate(

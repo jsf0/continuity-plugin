@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 
+from continuity.context_labels import context_from_mapping, context_to_mapping
 from continuity.ingest.models import (
     ParsedBlock,
     ParsedDocument,
@@ -182,10 +183,42 @@ def _whole_document_segment(parsed: ParsedDocument, document: SourceDocument) ->
 def _with_document_context(
     metadata: dict[str, object], document: SourceDocument
 ) -> dict[str, object]:
-    context = document.metadata.get("context")
-    if isinstance(context, dict) and context.get("labels"):
-        return {**metadata, "context": dict(context)}
+    context = _derive_segment_context(metadata, document)
+    if context["labels"]:
+        return {**metadata, "context": context}
     return metadata
+
+
+def _derive_segment_context(metadata: dict[str, object], document: SourceDocument) -> dict[str, object]:
+    raw_context = document.metadata.get("context")
+    context = dict(raw_context) if isinstance(raw_context, dict) else {}
+    labels = dict(context.get("labels", {})) if isinstance(context.get("labels"), dict) else {}
+    identity_keys = list(context.get("identity_keys", [])) if isinstance(context.get("identity_keys"), list) else []
+
+    manpage_name = metadata.get("manpage_name")
+    manual_section = _manual_section(document)
+    if isinstance(manpage_name, str) and manpage_name.strip():
+        labels.setdefault("command", manpage_name)
+        if "command" not in identity_keys:
+            identity_keys.append("command")
+    if manual_section:
+        labels.setdefault("manual_section", manual_section)
+        if "manual_section" not in identity_keys:
+            identity_keys.append("manual_section")
+
+    if labels:
+        context["labels"] = labels
+    if identity_keys:
+        context["identity_keys"] = identity_keys
+    return context_to_mapping(context_from_mapping(context))
+
+
+def _manual_section(document: SourceDocument) -> str | None:
+    text = " ".join(
+        item for item in (document.title, document.uri, document.source_id) if isinstance(item, str)
+    )
+    match = re.search(r"\.([0-9][A-Za-z]*)(?:\.in|\.txt)?(?:\s|$)", text)
+    return match.group(1) if match else None
 
 
 def _blocks_to_text(blocks: list[ParsedBlock]) -> str:

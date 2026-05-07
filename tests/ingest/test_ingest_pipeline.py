@@ -250,3 +250,11 @@ def test_pipeline_ingests_raw_manpage_sources(tmp_path) -> None:
         "Manpage NAME: ifconfig",
         "Manpage SYNOPSIS: ifconfig",
     }
+    assert segments[0]["metadata"]["context"] == {
+        "labels": {"os": "openbsd", "command": "ifconfig", "manual_section": "8"},
+        "partition_keys": ["os"],
+        "soft_keys": [],
+        "identity_keys": ["command", "manual_section"],
+        "collision_risk": "high",
+    }
+    assert candidates[0]["ingestion"]["context"] == segments[0]["metadata"]["context"]
