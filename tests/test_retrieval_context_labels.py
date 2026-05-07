@@ -33,6 +33,31 @@ def make_record(record_id: str, *, label_key: str, label_value: str, summary: st
     )
 
 
+def make_manpage_record(record_id: str, *, command: str, summary: str) -> ContextRecord:
+    return ContextRecord.new(
+        id=record_id,
+        kind="artifact_summary",
+        title=f"Manpage DESCRIPTION: {command}",
+        summary=summary,
+        details=f"OpenBSD {command}(8) details.",
+        tags=["openbsd", command, "manpage"],
+        entities=[command],
+        confidence=0.9,
+        importance=0.8,
+        trust_level="corpus_distilled",
+        quality={
+            "context": context_to_mapping(
+                ContextLabelSet(
+                    labels={"os": "openbsd", "command": command, "manual_section": "8"},
+                    partition_keys=frozenset({"os"}),
+                    identity_keys=frozenset({"command", "manual_section"}),
+                    collision_risk="high",
+                )
+            )
+        },
+    )
+
+
 def seeded_store(tmp_path: Path, records: list[ContextRecord]) -> ContinuityStore:
     store = ContinuityStore(tmp_path / "continuity.db")
     store.migrate()
@@ -116,6 +141,39 @@ def test_missing_query_context_withholds_high_collision_records(tmp_path: Path) 
     assert {candidate.rejected_reason for candidate in debug["rejected"]} == {
         "missing_partition_context:os"
     }
+
+
+def test_identity_query_context_rejects_other_manpage_commands(tmp_path: Path) -> None:
+    store = seeded_store(
+        tmp_path,
+        [
+            make_manpage_record(
+                "openbsd_ifconfig_8",
+                command="ifconfig",
+                summary="Configure network interface addresses and options.",
+            ),
+            make_manpage_record(
+                "openbsd_route_8",
+                command="route",
+                summary="Manipulate network routing tables and gateways.",
+            ),
+        ],
+    )
+    retriever = ContinuityRetriever(store, association_enabled=False)
+
+    debug = retriever.debug_search(
+        "configure network interface",
+        query_context={
+            "labels": {"os": "openbsd", "command": "ifconfig", "manual_section": "8"},
+            "partition_keys": ["os"],
+            "identity_keys": ["command", "manual_section"],
+        },
+        limit=10,
+    )
+
+    assert [candidate.record.id for candidate in debug["selected"]] == ["openbsd_ifconfig_8"]
+    rejected = {candidate.record.id: candidate.rejected_reason for candidate in debug["rejected"]}
+    assert rejected["openbsd_route_8"] == "context_label_conflict:command"
 
 
 def test_comparison_intent_allows_conflicting_partitions(tmp_path: Path) -> None:

@@ -35,6 +35,44 @@ def test_partition_label_conflict_is_hard_conflict() -> None:
     assert "context_label_conflict:os" in result.reasons
 
 
+def test_identity_label_conflict_is_hard_conflict_when_query_supplies_identity() -> None:
+    query = ContextLabelSet(
+        labels={"os": "openbsd", "command": "ifconfig"},
+        partition_keys={"os"},
+        identity_keys={"command"},
+    )
+    record = ContextLabelSet(
+        labels={"os": "openbsd", "command": "route"},
+        partition_keys={"os"},
+        identity_keys={"command"},
+        collision_risk="high",
+    )
+
+    result = compare_contexts(query, record)
+
+    assert result.rejected is True
+    assert result.hard_conflict is True
+    assert result.conflicts == {"command": ("ifconfig", "route")}
+    assert "context_label_conflict:command" in result.reasons
+
+
+def test_missing_identity_context_does_not_withhold_matching_partition() -> None:
+    query = ContextLabelSet(labels={"os": "openbsd"}, partition_keys={"os"})
+    record = ContextLabelSet(
+        labels={"os": "openbsd", "command": "route"},
+        partition_keys={"os"},
+        identity_keys={"command"},
+        collision_risk="high",
+    )
+
+    result = compare_contexts(query, record)
+
+    assert result.rejected is False
+    assert result.hard_conflict is False
+    assert result.missing_required_partition is False
+    assert result.matched == {"os": "openbsd"}
+
+
 def test_missing_partition_on_high_collision_record_is_required_context_missing() -> None:
     record = ContextLabelSet(labels={"os": "openbsd"}, partition_keys={"os"}, collision_risk="high")
 

@@ -147,7 +147,7 @@ def compare_contexts(
             else:
                 reasons.append(f"context_label_conflict:{key}")
 
-    hard_keys = query.partition_keys | record.partition_keys
+    hard_keys = query.partition_keys | record.partition_keys | query.identity_keys | record.identity_keys
     hard_conflict = bool(hard_keys & set(conflicts))
 
     missing_query_keys = frozenset(key for key in record.partition_keys if key not in query.labels)
