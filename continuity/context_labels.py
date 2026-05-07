@@ -54,6 +54,7 @@ class ContextCompatibility:
     missing_record_keys: frozenset[str]
     hard_conflict: bool
     missing_required_partition: bool
+    missing_required_record: bool
     comparison_allowed: bool
     score_adjustment: float
     reasons: tuple[str, ...]
@@ -63,7 +64,9 @@ class ContextCompatibility:
         """Return true when normal retrieval should withhold the record."""
 
         return (
-            self.hard_conflict or self.missing_required_partition
+            self.hard_conflict
+            or self.missing_required_partition
+            or self.missing_required_record
         ) and not self.comparison_allowed
 
 
@@ -151,13 +154,17 @@ def compare_contexts(
     hard_conflict = bool(hard_keys & set(conflicts))
 
     missing_query_keys = frozenset(key for key in record.partition_keys if key not in query.labels)
-    missing_record_keys = frozenset(key for key in query.partition_keys if key not in record.labels)
+    required_record_keys = query.partition_keys | query.identity_keys
+    missing_record_keys = frozenset(
+        key for key in required_record_keys if key in query.labels and key not in record.labels
+    )
     missing_required_partition = (
         record.collision_risk == "high"
         and bool(record.partition_keys)
         and bool(missing_query_keys)
         and not allow_missing_partition
     )
+    missing_required_record = bool(missing_record_keys) and not allow_missing_partition
     for key in sorted(missing_query_keys):
         reasons.append(f"missing_partition_context:{key}")
     for key in sorted(missing_record_keys):
@@ -171,6 +178,8 @@ def compare_contexts(
         score_adjustment -= 100.0
     if missing_required_partition and not comparison_intent:
         score_adjustment -= 100.0
+    if missing_required_record and not comparison_intent:
+        score_adjustment -= 100.0
 
     return ContextCompatibility(
         matched=matched,
@@ -179,6 +188,7 @@ def compare_contexts(
         missing_record_keys=missing_record_keys,
         hard_conflict=hard_conflict,
         missing_required_partition=missing_required_partition,
+        missing_required_record=missing_required_record,
         comparison_allowed=bool(comparison_intent),
         score_adjustment=score_adjustment,
         reasons=tuple(reasons),

@@ -176,6 +176,48 @@ def test_identity_query_context_rejects_other_manpage_commands(tmp_path: Path) -
     assert rejected["openbsd_route_8"] == "context_label_conflict:command"
 
 
+def test_identity_query_context_rejects_unlabeled_manpage_like_records(tmp_path: Path) -> None:
+    unlabeled = ContextRecord.new(
+        id="unlabeled_openbsd_notes",
+        kind="environment_fact",
+        title="Fetched OpenBSD manpages",
+        summary="Fetched OpenBSD ifconfig route pfctl ac apmd syslogd vmctl ntpd manpages.",
+        details="This operational note mentions many OpenBSD section 8 commands but is not a command-specific corpus record.",
+        tags=["openbsd", "manpage"],
+        entities=["OpenBSD", "ifconfig", "route"],
+        confidence=0.9,
+        importance=0.8,
+        trust_level="built_in_memory_mirror",
+    )
+    store = seeded_store(
+        tmp_path,
+        [
+            unlabeled,
+            make_manpage_record(
+                "openbsd_ifconfig_8",
+                command="ifconfig",
+                summary="Configure network interface addresses and options.",
+            ),
+        ],
+    )
+    retriever = ContinuityRetriever(store, association_enabled=False)
+
+    debug = retriever.debug_search(
+        "OpenBSD ifconfig interface address",
+        query_context={
+            "labels": {"os": "openbsd", "command": "ifconfig", "manual_section": "8"},
+            "partition_keys": ["os"],
+            "identity_keys": ["command", "manual_section"],
+            "collision_risk": "high",
+        },
+        limit=10,
+    )
+
+    assert [candidate.record.id for candidate in debug["selected"]] == ["openbsd_ifconfig_8"]
+    rejected = {candidate.record.id: candidate.rejected_reason for candidate in debug["rejected"]}
+    assert rejected["unlabeled_openbsd_notes"] == "missing_record_context:command"
+
+
 def test_comparison_intent_allows_conflicting_partitions(tmp_path: Path) -> None:
     store = seeded_store(
         tmp_path,

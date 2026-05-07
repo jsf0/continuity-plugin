@@ -845,6 +845,10 @@ def _apply_context_compatibility(
         missing_key = next(iter(sorted(compatibility.missing_query_keys)), "context")
         candidate.rejected_reason = f"missing_partition_context:{missing_key}"
         return False
+    if compatibility.missing_required_record and not compatibility.comparison_allowed:
+        missing_key = next(iter(sorted(compatibility.missing_record_keys)), "context")
+        candidate.rejected_reason = f"missing_record_context:{missing_key}"
+        return False
     return True
 
 
@@ -869,6 +873,8 @@ def _association_context_allowed(
         return False, "context_label_conflict"
     if compatibility.missing_required_partition and not compatibility.comparison_allowed:
         return False, "missing_partition_context"
+    if compatibility.missing_required_record and not compatibility.comparison_allowed:
+        return False, "missing_record_context"
     return True, "allowed"
 
 
