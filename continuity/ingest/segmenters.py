@@ -16,6 +16,7 @@ from continuity.ingest.models import (
 
 _SLUG_RE = re.compile(r"[^a-z0-9]+")
 _SKIP_MANPAGE_SECTIONS = {"HISTORY", "AUTHORS", "SEE ALSO", "STANDARDS"}
+_MANPAGE_XREF_RE = re.compile(r"\b([A-Za-z0-9_.+:-]+)\(([0-9][A-Za-z]*)\)")
 
 
 class HeadingSectionSegmenter:
@@ -80,6 +81,7 @@ class ManPageSectionSegmenter:
             return [_whole_document_segment(parsed, document)] if parsed.blocks else []
 
         manpage_name = _manpage_name(document)
+        document_references = _manpage_outbound_references(parsed.blocks)
         segments: list[SourceSegment] = []
         for position, block_index in enumerate(heading_indexes):
             heading = parsed.blocks[block_index]
@@ -103,11 +105,12 @@ class ManPageSectionSegmenter:
                     text=segment_text,
                     location=location,
                     metadata=_with_document_context(
-                        {
-                            "content_hash": stable_hash(segment_text),
-                            "manpage_name": manpage_name,
-                            "manpage_section": section_name,
-                        },
+                        _manpage_section_metadata(
+                            segment_text,
+                            manpage_name=manpage_name,
+                            section_name=section_name,
+                            outbound_references=document_references,
+                        ),
                         document,
                     ),
                     scope_project=document.scope_project,
@@ -189,11 +192,70 @@ def _with_document_context(
     return metadata
 
 
-def _derive_segment_context(metadata: dict[str, object], document: SourceDocument) -> dict[str, object]:
+def _manpage_section_metadata(
+    segment_text: str,
+    *,
+    manpage_name: str,
+    section_name: str,
+    outbound_references: list[dict[str, str]],
+) -> dict[str, object]:
+    metadata: dict[str, object] = {
+        "content_hash": stable_hash(segment_text),
+        "manpage_name": manpage_name,
+        "manpage_section": section_name,
+    }
+    if outbound_references:
+        metadata["outbound_references"] = outbound_references
+    return metadata
+
+
+def _manpage_outbound_references(blocks: list[ParsedBlock]) -> list[dict[str, str]]:
+    """Extract typed cross-document references from non-operational manpage sections.
+
+    The output shape is intentionally generic (target/type/relation) so retrieval
+    can later connect corpus records through any source-level reference, while
+    this parser supplies one concrete source: SEE ALSO manpage xrefs.
+    """
+
+    references: list[dict[str, str]] = []
+    seen: set[tuple[str, str, str]] = set()
+    in_see_also = False
+    for block in blocks:
+        if block.kind == "heading":
+            in_see_also = block.text == "SEE ALSO"
+            continue
+        if not in_see_also or not block.text:
+            continue
+        for match in _MANPAGE_XREF_RE.finditer(block.text):
+            target = match.group(1).strip()
+            manual_section = match.group(2).strip()
+            key = ("manpage", target.casefold(), manual_section.casefold())
+            if key in seen:
+                continue
+            seen.add(key)
+            references.append(
+                {
+                    "target_type": "manpage",
+                    "target": target,
+                    "section": manual_section,
+                    "raw": match.group(0),
+                    "relation": "see-also",
+                }
+            )
+    return references
+
+
+def _derive_segment_context(
+    metadata: dict[str, object], document: SourceDocument
+) -> dict[str, object]:
     raw_context = document.metadata.get("context")
     context = dict(raw_context) if isinstance(raw_context, dict) else {}
     labels = dict(context.get("labels", {})) if isinstance(context.get("labels"), dict) else {}
-    identity_keys = list(context.get("identity_keys", [])) if isinstance(context.get("identity_keys"), list) else []
+    identity_keys = (
+        list(context.get("identity_keys", []))
+        if isinstance(context.get("identity_keys"), list)
+        else []
+    )
 
     manpage_name = metadata.get("manpage_name")
     manual_section = _manual_section(document)

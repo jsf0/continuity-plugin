@@ -208,6 +208,11 @@ def _source_ref(document: SourceDocument, segment: SourceSegment) -> SourceRef:
     context = segment.metadata.get("context")
     if isinstance(context, dict) and context.get("labels"):
         metadata["context"] = dict(context)
+    outbound_references = segment.metadata.get("outbound_references")
+    if isinstance(outbound_references, list) and outbound_references:
+        metadata["outbound_references"] = [
+            dict(reference) for reference in outbound_references if isinstance(reference, dict)
+        ]
     return SourceRef(
         type="file" if document.uri.startswith("file://") else document.source_type,
         uri=document.uri,

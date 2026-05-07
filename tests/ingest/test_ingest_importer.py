@@ -111,6 +111,68 @@ def test_importer_is_idempotent_and_updates_existing_record(tmp_path) -> None:
     assert record.summary == "Updated pytest command summary."
 
 
+def test_importer_builds_source_reference_association_edges(tmp_path) -> None:
+    store = ContinuityStore(tmp_path / "continuity.db")
+    importer = ContinuityImporter(store)
+    ldomctl = CandidateRecord.from_dict(
+        {
+            **_candidate("ldomctl-description").to_dict(),
+            "title": "Manpage DESCRIPTION: ldomctl",
+            "summary": "The ldomctl utility manages logical domains.",
+            "tags": ["manpage", "manual-section", "description"],
+            "entities": ["ldomctl", "DESCRIPTION"],
+            "source_refs": [
+                {
+                    "type": "file",
+                    "uri": "file://ldomctl.8",
+                    "segment_id": "file://ldomctl.8#description",
+                    "section": "DESCRIPTION",
+                    "metadata": {
+                        "outbound_references": [
+                            {
+                                "target_type": "manpage",
+                                "target": "ldom.conf",
+                                "section": "5",
+                                "raw": "ldom.conf(5)",
+                                "relation": "see-also",
+                            }
+                        ]
+                    },
+                }
+            ],
+        }
+    )
+    ldom_conf = CandidateRecord.from_dict(
+        {
+            **_candidate("ldom-conf-description").to_dict(),
+            "title": "Manpage DESCRIPTION: ldom.conf",
+            "summary": "ldom.conf is the configuration file for logical domains.",
+            "tags": ["manpage", "manual-section", "description"],
+            "entities": ["ldom.conf", "DESCRIPTION"],
+            "source_refs": [
+                {
+                    "type": "file",
+                    "uri": "file://ldom.conf.5",
+                    "segment_id": "file://ldom.conf.5#description",
+                    "section": "DESCRIPTION",
+                }
+            ],
+        }
+    )
+
+    result = importer.import_records([ldomctl, ldom_conf], dry_run=False)
+
+    assert result.failed == []
+    assert len(result.created) == 2
+    edges = store.list_association_edge_inventory(limit=10)
+    assert len(edges) == 1
+    assert edges[0]["edge_type"] == "source_reference"
+    assert {edges[0]["title_a"], edges[0]["title_b"]} == {
+        "Manpage DESCRIPTION: ldomctl",
+        "Manpage DESCRIPTION: ldom.conf",
+    }
+
+
 def test_candidate_to_context_record_preserves_ingestion_context_labels() -> None:
     candidate = CandidateRecord.from_dict(
         {

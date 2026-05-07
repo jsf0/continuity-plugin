@@ -51,6 +51,12 @@ def association_evidence(
     left_text = _text_tokens(left)
     right_text = _text_tokens(right)
 
+    reference_evidence = _source_reference_evidence(
+        left, right, left_entities=left_entities, right_entities=right_entities
+    )
+    if reference_evidence is not None:
+        return reference_evidence
+
     if _only_generic_mirror_overlap(
         left, right, left_entities, right_entities, left_tags, right_tags
     ):
@@ -127,6 +133,85 @@ def _text_tokens(record: ContextRecord) -> set[str]:
         for token in tokenize_text(text)
         if len(token) > 2 and token not in ASSOCIATION_STRUCTURAL_TERMS
     }
+
+
+def _source_reference_evidence(
+    left: ContextRecord,
+    right: ContextRecord,
+    *,
+    left_entities: set[str],
+    right_entities: set[str],
+) -> AssociationEvidence | None:
+    left_refs = _outbound_reference_targets(left)
+    right_refs = _outbound_reference_targets(right)
+    left_identity = _record_identity_terms(left, left_entities)
+    right_identity = _record_identity_terms(right, right_entities)
+
+    left_to_right = tuple(sorted(left_refs & right_identity))
+    right_to_left = tuple(sorted(right_refs & left_identity))
+    matched = left_to_right or right_to_left
+    if not matched:
+        return None
+    reasons = ["source_outbound_reference"]
+    if left_to_right:
+        reasons.append("left_references_right")
+    if right_to_left:
+        reasons.append("right_references_left")
+    return AssociationEvidence(
+        strength=0.72,
+        edge_type="source_reference",
+        shared_entities=matched,
+        shared_tags=(),
+        shared_terms=(),
+        reasons=tuple(reasons),
+    )
+
+
+def _outbound_reference_targets(record: ContextRecord) -> set[str]:
+    targets: set[str] = set()
+    for source in record.sources:
+        metadata = source.metadata or {}
+        references = metadata.get("outbound_references")
+        if not isinstance(references, list):
+            continue
+        for reference in references:
+            if not isinstance(reference, dict):
+                continue
+            target = normalize_phrase(str(reference.get("target") or ""))
+            raw = normalize_phrase(str(reference.get("raw") or ""))
+            if target:
+                targets.add(target)
+            if raw:
+                targets.add(raw)
+    return targets
+
+
+def _record_identity_terms(record: ContextRecord, entities: set[str]) -> set[str]:
+    terms = set(entities)
+    title = normalize_phrase(record.title)
+    if title:
+        terms.add(title)
+    for source in record.sources:
+        metadata = source.metadata or {}
+        context = metadata.get("context")
+        if not isinstance(context, dict):
+            continue
+        labels = context.get("labels")
+        if not isinstance(labels, dict):
+            continue
+        for value in labels.values():
+            label = normalize_phrase(str(value or ""))
+            if label:
+                terms.add(label)
+    quality_context = record.quality.get("context") if isinstance(record.quality, dict) else None
+    if isinstance(quality_context, dict):
+        labels = quality_context.get("labels")
+        if isinstance(labels, dict):
+            for value in labels.values():
+                label = normalize_phrase(str(value or ""))
+                if label:
+                    terms.add(label)
+    return terms
 
 
 def _only_generic_mirror_overlap(

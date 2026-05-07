@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from continuity.context_labels import ContextLabelSet, context_to_mapping
-from continuity.models import ContextRecord
+from continuity.models import ContextRecord, SourceRef
 from continuity.retrieval import ContinuityRetriever
 from continuity.store import ContinuityStore
 
@@ -33,22 +33,30 @@ def make_record(record_id: str, *, label_key: str, label_value: str, summary: st
     )
 
 
-def make_manpage_record(record_id: str, *, command: str, summary: str) -> ContextRecord:
+def make_manpage_record(
+    record_id: str,
+    *,
+    command: str,
+    summary: str,
+    manual_section: str = "8",
+    sources: list[SourceRef] | None = None,
+) -> ContextRecord:
     return ContextRecord.new(
         id=record_id,
         kind="artifact_summary",
         title=f"Manpage DESCRIPTION: {command}",
         summary=summary,
-        details=f"OpenBSD {command}(8) details.",
+        details=f"OpenBSD {command}({manual_section}) details.",
         tags=["openbsd", command, "manpage"],
         entities=[command],
+        sources=sources,
         confidence=0.9,
         importance=0.8,
         trust_level="corpus_distilled",
         quality={
             "context": context_to_mapping(
                 ContextLabelSet(
-                    labels={"os": "openbsd", "command": command, "manual_section": "8"},
+                    labels={"os": "openbsd", "command": command, "manual_section": manual_section},
                     partition_keys=frozenset({"os"}),
                     identity_keys=frozenset({"command", "manual_section"}),
                     collision_risk="high",
@@ -141,6 +149,116 @@ def test_missing_query_context_withholds_high_collision_records(tmp_path: Path) 
     assert {candidate.rejected_reason for candidate in debug["rejected"]} == {
         "missing_partition_context:os"
     }
+
+
+def test_query_terms_infer_context_for_high_collision_manpage_records(tmp_path: Path) -> None:
+    store = seeded_store(
+        tmp_path,
+        [
+            make_manpage_record(
+                "openbsd_ldomctl_8",
+                command="ldomctl",
+                summary="OpenBSD ldomctl can stop guest domains from the primary domain.",
+            ),
+            make_manpage_record(
+                "openbsd_fdisk_8",
+                command="fdisk",
+                summary="OpenBSD fdisk edits MBR partition tables.",
+            ),
+        ],
+    )
+
+    debug = ContinuityRetriever(store, association_enabled=False).debug_search(
+        "How do I stop ldomctl guest domains on OpenBSD sparc64?",
+        limit=10,
+    )
+
+    assert [candidate.record.id for candidate in debug["selected"]] == ["openbsd_ldomctl_8"]
+    rejected = {candidate.record.id: candidate.rejected_reason for candidate in debug["rejected"]}
+    assert rejected["openbsd_fdisk_8"] == "context_label_conflict:command"
+
+
+def test_source_reference_edges_can_bridge_related_manpage_identity_contexts(
+    tmp_path: Path,
+) -> None:
+    ldomctl = make_manpage_record(
+        "openbsd_ldomctl_8",
+        command="ldomctl",
+        summary="OpenBSD ldomctl manages and configures logical domains.",
+        sources=[
+            SourceRef(
+                type="corpus_segment",
+                id="ldomctl-description",
+                metadata={
+                    "outbound_references": [
+                        {
+                            "target_type": "manpage",
+                            "target": "ldom.conf",
+                            "section": "5",
+                            "raw": "ldom.conf(5)",
+                            "relation": "see-also",
+                        }
+                    ]
+                },
+            )
+        ],
+    )
+    ldom_conf = make_manpage_record(
+        "openbsd_ldom_conf_5",
+        command="ldom.conf",
+        manual_section="5",
+        summary="OpenBSD ldom.conf describes logical domain configuration syntax.",
+    )
+    fdisk = make_manpage_record(
+        "openbsd_fdisk_8",
+        command="fdisk",
+        summary="OpenBSD fdisk edits MBR partition tables.",
+    )
+    store = seeded_store(tmp_path, [ldomctl, ldom_conf, fdisk])
+    store.upsert_association_edge(
+        "openbsd_ldomctl_8",
+        "openbsd_ldom_conf_5",
+        strength=0.72,
+        edge_type="source_reference",
+    )
+
+    debug = ContinuityRetriever(store, association_enabled=True).debug_search(
+        "How do I configure ldoms with ldomctl on OpenBSD?",
+        limit=10,
+    )
+
+    selected_ids = [candidate.record.id for candidate in debug["selected"]]
+    assert "openbsd_ldomctl_8" in selected_ids
+    assert "openbsd_ldom_conf_5" in selected_ids
+    assert "openbsd_fdisk_8" not in selected_ids
+
+
+def test_query_terms_complete_partial_context_for_high_collision_records(tmp_path: Path) -> None:
+    store = seeded_store(
+        tmp_path,
+        [
+            make_manpage_record(
+                "openbsd_ldomctl_8",
+                command="ldomctl",
+                summary="OpenBSD ldomctl can stop guest domains from the primary domain.",
+            ),
+            make_manpage_record(
+                "openbsd_fdisk_8",
+                command="fdisk",
+                summary="OpenBSD fdisk edits MBR partition tables.",
+            ),
+        ],
+    )
+
+    debug = ContinuityRetriever(store, association_enabled=False).debug_search(
+        "How do I stop ldomctl guest domains?",
+        query_context={"labels": {"os": "openbsd"}, "partition_keys": ["os"]},
+        limit=10,
+    )
+
+    assert [candidate.record.id for candidate in debug["selected"]] == ["openbsd_ldomctl_8"]
+    rejected = {candidate.record.id: candidate.rejected_reason for candidate in debug["rejected"]}
+    assert rejected["openbsd_fdisk_8"] == "context_label_conflict:command"
 
 
 def test_identity_query_context_rejects_other_manpage_commands(tmp_path: Path) -> None:

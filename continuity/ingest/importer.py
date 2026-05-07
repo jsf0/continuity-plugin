@@ -61,7 +61,7 @@ class ContinuityImporter:
                 if dry_run:
                     skipped.append(candidate.candidate_id)
                     continue
-                self.store.upsert_record(record, create_associations=False)
+                self.store.upsert_record(record)
                 if existing:
                     updated.append(record.id)
                 else:

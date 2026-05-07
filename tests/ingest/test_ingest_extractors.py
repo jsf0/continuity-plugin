@@ -5,6 +5,7 @@ from pathlib import Path
 from continuity.ingest.extractors import (
     CodeOrConfigFactExtractor,
     EvalCaseGenerator,
+    ManPageFactExtractor,
     ProcedureCandidateExtractor,
     ProjectCapsuleExtractor,
 )
@@ -118,6 +119,50 @@ def test_code_or_config_fact_extractor_detects_test_commands() -> None:
     assert candidates[0].tags == ["codebase-map", "test-command"]
     assert candidates[1].title == "Lint command: uv run ruff check ."
     assert candidates[1].tags == ["codebase-map", "lint-command"]
+
+
+def test_manpage_fact_extractor_preserves_source_outbound_references() -> None:
+    segment = _segment(
+        segment_id="file://ldomctl.8#description",
+        source_id="file://ldomctl.8",
+        title="DESCRIPTION",
+        text="The ldomctl utility configures logical domains.",
+    )
+    segment = SourceSegment.from_dict(
+        {
+            **segment.to_dict(),
+            "kind": "manpage_section",
+            "metadata": {
+                **segment.metadata,
+                "manpage_name": "ldomctl",
+                "manpage_section": "DESCRIPTION",
+                "outbound_references": [
+                    {
+                        "target_type": "manpage",
+                        "target": "ldom.conf",
+                        "section": "5",
+                        "raw": "ldom.conf(5)",
+                        "relation": "see-also",
+                    }
+                ],
+            },
+        }
+    )
+
+    candidate = ManPageFactExtractor().extract(
+        segment, _document(source_id="file://ldomctl.8", title="ldomctl.8")
+    )[0]
+
+    assert candidate.title == "Manpage DESCRIPTION: ldomctl"
+    assert candidate.source_refs[0].metadata["outbound_references"] == [
+        {
+            "target_type": "manpage",
+            "target": "ldom.conf",
+            "section": "5",
+            "raw": "ldom.conf(5)",
+            "relation": "see-also",
+        }
+    ]
 
 
 def test_eval_case_generator_creates_positive_eval_from_candidate() -> None:

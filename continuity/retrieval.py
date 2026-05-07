@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 
 from .config import RetrievalGateConfig
 from .context_labels import (
+    ContextCompatibility,
     ContextLabelSet,
     compare_contexts,
     context_from_mapping,
@@ -388,6 +389,12 @@ class ContinuityRetriever:
             query_context
             if isinstance(query_context, ContextLabelSet)
             else context_from_mapping(query_context or {})
+        )
+        effective_query_context = _infer_query_context_from_record_labels(
+            effective_query_context,
+            expanded_tokens,
+            self.store.list_records(),
+            include_stale=include_stale,
         )
         effective_comparison_intent = comparison_intent or has_comparison_intent(query)
         personal_query = bool(raw_tokens & PERSONAL_QUERY_RAW_TERMS)
@@ -822,6 +829,60 @@ class ContinuityRetriever:
         return trace
 
 
+def _infer_query_context_from_record_labels(
+    query_context: ContextLabelSet,
+    tokens: set[str],
+    records: list[ContextRecord],
+    *,
+    include_stale: bool,
+) -> ContextLabelSet:
+    """Infer explicit query context from label values present in the query text.
+
+    Corpus-ingested records can require partition labels such as ``os=openbsd``.
+    If the user literally says "OpenBSD" but no caller-provided query_context is
+    available, treating that token as a context label preserves the high-collision
+    safety gate while still surfacing exact document matches.
+    """
+
+    inferred: dict[str, str] = dict(query_context.labels)
+    explicit_keys = set(query_context.labels)
+    ambiguous_keys: set[str] = set()
+    partition_keys: set[str] = set(query_context.partition_keys)
+    identity_keys: set[str] = set(query_context.identity_keys)
+    for record in records:
+        if not include_stale and _is_inactive_or_expired(record):
+            continue
+        record_context = context_from_record(record)
+        for key, value in record_context.labels.items():
+            if key in explicit_keys or value not in tokens:
+                continue
+            previous = inferred.get(key)
+            if previous is not None and previous != value:
+                ambiguous_keys.add(key)
+                continue
+            inferred[key] = value
+            if key in record_context.partition_keys:
+                partition_keys.add(key)
+            if key in record_context.identity_keys:
+                identity_keys.add(key)
+
+    for key in ambiguous_keys - explicit_keys:
+        inferred.pop(key, None)
+        partition_keys.discard(key)
+        identity_keys.discard(key)
+
+    if inferred == query_context.labels:
+        return query_context
+
+    return ContextLabelSet(
+        labels=inferred,
+        partition_keys=frozenset(key for key in partition_keys if key in inferred),
+        soft_keys=query_context.soft_keys,
+        identity_keys=frozenset(key for key in identity_keys if key in inferred),
+        collision_risk=query_context.collision_risk,
+    )
+
+
 def _apply_context_compatibility(
     candidate: CandidateScore,
     query_context: ContextLabelSet,
@@ -856,6 +917,7 @@ def _association_context_allowed(
     *,
     root_seed: ContextRecord | None,
     neighbor: ContextRecord,
+    edge_type: str,
     query_context: ContextLabelSet,
     comparison_intent: bool,
 ) -> tuple[bool, str]:
@@ -869,6 +931,13 @@ def _association_context_allowed(
         comparison_intent=comparison_intent,
         allow_missing_partition=bool(root_context.labels),
     )
+    if _source_reference_context_bridge_allowed(
+        edge_type=edge_type,
+        query_context=effective_query_context,
+        record_context=context_from_record(neighbor),
+        compatibility=compatibility,
+    ):
+        return True, "allowed_source_reference_context_bridge"
     if compatibility.hard_conflict and not compatibility.comparison_allowed:
         return False, "context_label_conflict"
     if compatibility.missing_required_partition and not compatibility.comparison_allowed:
@@ -876,6 +945,38 @@ def _association_context_allowed(
     if compatibility.missing_required_record and not compatibility.comparison_allowed:
         return False, "missing_record_context"
     return True, "allowed"
+
+
+def _source_reference_context_bridge_allowed(
+    *,
+    edge_type: str,
+    query_context: ContextLabelSet,
+    record_context: ContextLabelSet,
+    compatibility: ContextCompatibility,
+) -> bool:
+    """Allow explicit source-reference edges to cross identity labels safely.
+
+    A source reference such as a manpage SEE ALSO link intentionally points from
+    one artifact identity to another.  It should not be rejected merely because
+    the root record's identity labels (for example command/manual_section) differ
+    from the neighbor's identity labels.  Partition labels (for example os,
+    customer, language) remain hard boundaries.
+    """
+
+    if edge_type != "source_reference" or compatibility.comparison_allowed:
+        return False
+    conflict_keys = set(compatibility.conflicts)
+    partition_conflicts = conflict_keys & (
+        query_context.partition_keys | record_context.partition_keys
+    )
+    if partition_conflicts:
+        return False
+    if compatibility.missing_required_partition:
+        return False
+    identity_conflicts = conflict_keys & (
+        query_context.identity_keys | record_context.identity_keys
+    )
+    return bool(identity_conflicts) and identity_conflicts == conflict_keys
 
 
 def _association_neighbor_allowed(
@@ -895,6 +996,7 @@ def _association_neighbor_allowed(
     context_allowed, context_cut_reason = _association_context_allowed(
         root_seed=root_seed,
         neighbor=neighbor,
+        edge_type=edge_type,
         query_context=query_context,
         comparison_intent=comparison_intent,
     )

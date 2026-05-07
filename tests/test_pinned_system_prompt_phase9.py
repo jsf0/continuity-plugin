@@ -94,6 +94,8 @@ def test_system_prompt_block_includes_continuity_guidance_when_pinning_disabled(
     assert "Use the memory tool more readily" in block
     assert "retrieved records are advisory background" in block
     assert "continuity_debug_retrieval" in block
+    assert "continuity_hydrate" in block
+    assert "hydrated source text" in block
 
 
 def test_system_prompt_block_skips_archived_records(tmp_path: Path) -> None:

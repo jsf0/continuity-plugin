@@ -84,7 +84,9 @@ def test_man_page_section_segmenter_groups_operational_sections(tmp_path) -> Non
         "DESCRIPTION\n"
         "The rcctl utility controls OpenBSD services.\n"
         "FILES\n"
-        "/etc/rc.conf.local stores local daemon configuration.\n",
+        "/etc/rc.conf.local stores local daemon configuration.\n"
+        "SEE ALSO\n"
+        "rc.conf.local(8), rc.d(8)\n",
         encoding="utf-8",
     )
     document = SourceDocument(
@@ -110,6 +112,22 @@ def test_man_page_section_segmenter_groups_operational_sections(tmp_path) -> Non
     assert synopsis.metadata["manpage_name"] == "rcctl"
     assert synopsis.segment_id == "file://rcctl.8.txt#synopsis"
     assert "rcctl enable daemon" in synopsis.text
+    assert synopsis.metadata["outbound_references"] == [
+        {
+            "target_type": "manpage",
+            "target": "rc.conf.local",
+            "section": "8",
+            "raw": "rc.conf.local(8)",
+            "relation": "see-also",
+        },
+        {
+            "target_type": "manpage",
+            "target": "rc.d",
+            "section": "8",
+            "raw": "rc.d(8)",
+            "relation": "see-also",
+        },
+    ]
 
 
 def test_heading_section_segmenter_marks_example_code_and_table_sections(tmp_path) -> None:

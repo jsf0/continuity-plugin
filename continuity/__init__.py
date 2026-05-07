@@ -589,6 +589,10 @@ def _continuity_system_guidance() -> str:
             "When the user asks about memory behavior, remembered facts, retrieval quality, "
             "or prior continuity work, inspect with continuity_status, continuity_search, "
             "or continuity_debug_retrieval instead of guessing.",
+            "When retrieved records cite durable corpus sources (for example manpages, "
+            "docs, code, or other corpus_segment sources) and the user asks for source "
+            "details, hydrate promising records with continuity_hydrate and prefer the "
+            "hydrated source text over short summaries.",
         ]
     )
 
