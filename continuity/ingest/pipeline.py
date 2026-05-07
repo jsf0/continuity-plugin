@@ -375,16 +375,16 @@ def _attach_context_to_segments(
             segment,
             metadata={
                 **segment.metadata,
-                "context": _merge_context_payloads(context_payload, segment.metadata.get("context")),
+                "context": _merge_context_payloads(
+                    context_payload, segment.metadata.get("context")
+                ),
             },
         )
         for segment in segments
     ]
 
 
-def _merge_context_payloads(
-    base: dict[str, object], overlay: object
-) -> dict[str, object]:
+def _merge_context_payloads(base: dict[str, object], overlay: object) -> dict[str, object]:
     if not isinstance(overlay, dict):
         return base
     base_context = context_from_mapping(base)

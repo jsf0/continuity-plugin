@@ -64,9 +64,7 @@ class ContextCompatibility:
         """Return true when normal retrieval should withhold the record."""
 
         return (
-            self.hard_conflict
-            or self.missing_required_partition
-            or self.missing_required_record
+            self.hard_conflict or self.missing_required_partition or self.missing_required_record
         ) and not self.comparison_allowed
 
 
@@ -150,7 +148,9 @@ def compare_contexts(
             else:
                 reasons.append(f"context_label_conflict:{key}")
 
-    hard_keys = query.partition_keys | record.partition_keys | query.identity_keys | record.identity_keys
+    hard_keys = (
+        query.partition_keys | record.partition_keys | query.identity_keys | record.identity_keys
+    )
     hard_conflict = bool(hard_keys & set(conflicts))
 
     missing_query_keys = frozenset(key for key in record.partition_keys if key not in query.labels)
