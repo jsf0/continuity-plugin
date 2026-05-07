@@ -158,7 +158,7 @@ def _source_reference_evidence(
     if right_to_left:
         reasons.append("right_references_left")
     return AssociationEvidence(
-        strength=0.72,
+        strength=0.95,
         edge_type="source_reference",
         shared_entities=matched,
         shared_tags=(),

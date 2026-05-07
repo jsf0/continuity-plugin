@@ -815,6 +815,11 @@ class ContinuityRetriever:
             candidate.retrieval_role = "associative_neighbor"
             candidate.activation = activation
             candidate.activation_trace = best_trace.get(neighbor_id, [])
+            if any(
+                edge.get("edge_type") == "source_reference" for edge in candidate.activation_trace
+            ):
+                candidate.metadata_boost = max(0.0, candidate.metadata_boost)
+                candidate.reasons.append("source_reference_context_bridge")
             candidate.association_score = activation
             candidate.reasons.append("associative_graph")
             selected.append(candidate)
@@ -1415,6 +1420,10 @@ def _suppress_duplicate_families(
 
 
 def _record_family_key(record: ContextRecord) -> str:
+    if record.trust_level == "corpus_distilled" and record.quality.get("context"):
+        context = context_from_record(record)
+        labels = ",".join(f"{key}={value}" for key, value in sorted(context.labels.items()))
+        return f"{record.kind}:{record.title.lower()}:{labels}"
     if record.trust_level != "built_in_memory_mirror":
         return record.id
     tokens = sorted(_query_tokens(record.summary))
