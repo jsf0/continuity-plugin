@@ -138,6 +138,54 @@ def _context_stats(
             for context in candidate_contexts
             if context.labels and context.collision_risk == "high" and not context.partition_keys
         ),
+        **_identity_partition_conflict_stats(candidates),
+    }
+
+
+def _identity_partition_conflict_stats(
+    candidates: Sequence[CandidateRecord],
+) -> dict[str, object]:
+    groups: dict[str, list[tuple[CandidateRecord, str, str]]] = {}
+    for candidate in candidates:
+        context = context_from_mapping(candidate.ingestion)
+        if (
+            context.collision_risk != "high"
+            or not context.identity_keys
+            or not context.partition_keys
+        ):
+            continue
+        for identity_key in sorted(context.identity_keys):
+            identity_value = context.labels.get(identity_key)
+            if not identity_value:
+                continue
+            identity = f"{identity_key}={identity_value}"
+            for partition_key in sorted(context.partition_keys):
+                partition_value = context.labels.get(partition_key)
+                if partition_value:
+                    groups.setdefault(identity, []).append(
+                        (candidate, partition_key, partition_value)
+                    )
+    conflicts: list[dict[str, object]] = []
+    for identity, rows in sorted(groups.items()):
+        by_partition_key: dict[str, set[str]] = {}
+        for _candidate, partition_key, partition_value in rows:
+            by_partition_key.setdefault(partition_key, set()).add(partition_value)
+        for partition_key, values in sorted(by_partition_key.items()):
+            if len(values) < 2:
+                continue
+            titles = sorted({candidate.title for candidate, _, _ in rows})
+            conflicts.append(
+                {
+                    "identity": identity,
+                    "partition_key": partition_key,
+                    "partition_values": sorted(values),
+                    "candidate_count": len(rows),
+                    "titles": titles[:10],
+                }
+            )
+    return {
+        "identity_partition_conflict_count": len(conflicts),
+        "identity_partition_conflicts": conflicts[:20],
     }
 
 

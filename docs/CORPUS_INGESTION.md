@@ -93,6 +93,7 @@ Important fields:
 - `context.documents_with_labels`, `segments_with_labels`, `candidates_with_labels` — propagation checks for context-labeled runs.
 - `context.by_partition_key` / `by_label_key` / `by_collision_risk` — high-collision labeling profile.
 - `context.high_collision_without_partition` — warning signal for labels that cannot enforce hard partition safety.
+- `context.identity_partition_conflicts` — high-collision candidates that share an identity label but span multiple partition values, useful for spotting expected collisions like OpenBSD/Linux `ifconfig` and unexpected under-labeling.
 - `rejections.by_reason` — quality/safety/dedupe failure modes.
 
 Example quick inspection:
