@@ -275,12 +275,35 @@ def _cmd_review(args: argparse.Namespace) -> None:
 
 
 def _cmd_import(args: argparse.Namespace) -> None:
-    candidates = [CandidateRecord.from_dict(row) for row in read_jsonl(args.approved_records)]
+    approved_path = Path(args.approved_records)
+    candidates = [CandidateRecord.from_dict(row) for row in read_jsonl(approved_path)]
+    documents, segments = _load_sibling_corpus_artifacts(approved_path)
     result = ContinuityImporter(ContinuityStore(args.db_path)).import_records(
         candidates,
         dry_run=not args.apply,
+        documents=documents,
+        segments=segments,
     )
     print(json.dumps(result.__dict__, sort_keys=True))
+
+
+def _load_sibling_corpus_artifacts(
+    approved_path: Path,
+) -> tuple[list[SourceDocument], list[SourceSegment]]:
+    run_dir = approved_path.parent
+    inventory_path = run_dir / "inventory.jsonl"
+    segments_path = run_dir / "segments.jsonl"
+    documents = (
+        [SourceDocument.from_dict(row) for row in read_jsonl(inventory_path)]
+        if inventory_path.exists()
+        else []
+    )
+    segments = (
+        [SourceSegment.from_dict(row) for row in read_jsonl(segments_path)]
+        if segments_path.exists()
+        else []
+    )
+    return documents, segments
 
 
 def _cmd_eval(args: argparse.Namespace) -> None:
@@ -299,11 +322,15 @@ def _cmd_eval(args: argparse.Namespace) -> None:
 
 
 def _cmd_validate_import(args: argparse.Namespace) -> int:
-    candidates = [CandidateRecord.from_dict(row) for row in read_jsonl(args.approved_records)]
+    approved_path = Path(args.approved_records)
+    candidates = [CandidateRecord.from_dict(row) for row in read_jsonl(approved_path)]
+    documents, segments = _load_sibling_corpus_artifacts(approved_path)
     with TemporaryDirectory(prefix="continuity-ingest-validate-") as temp_dir:
         db_path = Path(temp_dir) / "continuity.db"
         store = ContinuityStore(db_path)
-        import_result = ContinuityImporter(store).import_records(candidates, dry_run=False)
+        import_result = ContinuityImporter(store).import_records(
+            candidates, dry_run=False, documents=documents, segments=segments
+        )
         eval_result = EvalRunner(store).run_file(args.evals, report_path=args.report)
     print(
         json.dumps(

@@ -62,6 +62,22 @@ CONTINUITY_GET_SCHEMA: dict[str, object] = {
     },
 }
 
+CONTINUITY_HYDRATE_SCHEMA: dict[str, object] = {
+    "name": "continuity_hydrate",
+    "description": "Fetch a continuity record plus full text for any durable corpus source segments it cites.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "id": {"type": "string", "description": "Record id."},
+            "max_chars": {
+                "type": "integer",
+                "description": "Maximum total source text characters to return.",
+            },
+        },
+        "required": ["id"],
+    },
+}
+
 CONTINUITY_ADD_SCHEMA: dict[str, object] = {
     "name": "continuity_add",
     "description": "Add or replace an explicit continuity memory record.",
@@ -270,6 +286,7 @@ ALL_TOOL_SCHEMAS = [
     CONTINUITY_STATUS_SCHEMA,
     CONTINUITY_SEARCH_SCHEMA,
     CONTINUITY_GET_SCHEMA,
+    CONTINUITY_HYDRATE_SCHEMA,
     CONTINUITY_ADD_SCHEMA,
     CONTINUITY_DELETE_SCHEMA,
     CONTINUITY_ARCHIVE_SCHEMA,
@@ -344,6 +361,21 @@ def handle_get(store: ContinuityStore, args: dict[str, Any]) -> dict[str, object
         "success": True,
         "record": record.to_dict(),
         "skill_links": [link.to_dict() for link in store.list_skill_links(record.id)],
+    }
+
+
+def handle_hydrate(store: ContinuityStore, args: dict[str, Any]) -> dict[str, object]:
+    record_id = str(args.get("id") or "").strip()
+    if not record_id:
+        return {"success": False, "error": "id is required for continuity_hydrate"}
+    record = store.get_record(record_id)
+    if record is None:
+        return {"success": False, "error": f"record not found: {record_id}"}
+    max_chars = _bounded_int(args.get("max_chars"), default=8000, minimum=0, maximum=100000)
+    return {
+        "success": True,
+        "record": record.to_dict(),
+        "sources": store.hydrate_record_sources(record_id, max_chars=max_chars),
     }
 
 

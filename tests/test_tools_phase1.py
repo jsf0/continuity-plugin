@@ -22,6 +22,7 @@ def test_provider_exposes_phase4_tool_schemas() -> None:
         "continuity_status",
         "continuity_search",
         "continuity_get",
+        "continuity_hydrate",
         "continuity_add",
         "continuity_delete",
         "continuity_archive",

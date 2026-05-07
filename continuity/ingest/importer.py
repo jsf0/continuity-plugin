@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
 
 from continuity.context_labels import context_from_mapping, context_to_mapping
@@ -36,15 +37,26 @@ class ContinuityImporter:
         self.store = store
         self.store.migrate()
 
-    def import_records(self, candidates: list[CandidateRecord], *, dry_run: bool) -> ImportResult:
+    def import_records(
+        self,
+        candidates: list[CandidateRecord],
+        *,
+        dry_run: bool,
+        documents: list[object] | None = None,
+        segments: list[object] | None = None,
+    ) -> ImportResult:
         created: list[str] = []
         updated: list[str] = []
         skipped: list[str] = []
         failed: list[tuple[str, str]] = []
+        segment_index = _segment_index(segments or [])
+
+        if not dry_run and (documents or segments):
+            self.store.upsert_corpus_sources(documents or [], segments or [])
 
         for candidate in candidates:
             try:
-                record = candidate_to_context_record(candidate)
+                record = candidate_to_context_record(candidate, segment_index=segment_index)
                 existing = self.store.get_record(record.id)
                 if dry_run:
                     skipped.append(candidate.candidate_id)
@@ -65,7 +77,9 @@ class ContinuityImporter:
         )
 
 
-def candidate_to_context_record(candidate: CandidateRecord) -> ContextRecord:
+def candidate_to_context_record(
+    candidate: CandidateRecord, *, segment_index: dict[str, dict[str, object]] | None = None
+) -> ContextRecord:
     """Convert a candidate record into a continuity ContextRecord."""
 
     record = ContextRecord.new(
@@ -80,7 +94,10 @@ def candidate_to_context_record(candidate: CandidateRecord) -> ContextRecord:
         details=candidate.details,
         tags=candidate.tags,
         entities=candidate.entities,
-        sources=[_source_ref(source_ref) for source_ref in candidate.source_refs],
+        sources=[
+            _source_ref(source_ref, segment_index=segment_index or {})
+            for source_ref in candidate.source_refs
+        ],
         confidence=candidate.confidence,
         importance=candidate.importance,
         trust_level=candidate.trust_level,
@@ -123,15 +140,48 @@ def imported_record_id(candidate: CandidateRecord) -> str:
     )
 
 
-def _source_ref(source_ref: IngestSourceRef) -> SourceRef:
+def _source_ref(
+    source_ref: IngestSourceRef, *, segment_index: dict[str, dict[str, object]]
+) -> SourceRef:
+    segment = segment_index.get(source_ref.segment_id or "")
+    document_id = _optional_str(segment.get("source_id")) if segment else None
+    text = str(segment.get("text") or "") if segment else ""
+    content_hash = source_ref.content_hash or (_sha256_text(text) if text else None)
     return SourceRef(
-        type=source_ref.type,
+        type="corpus_segment" if source_ref.segment_id and segment else source_ref.type,
         id=source_ref.segment_id,
         uri=source_ref.uri or source_ref.url or source_ref.path,
         range=_range_label(source_ref),
         label=source_ref.section or source_ref.title,
         created_at=None,
+        document_id=document_id,
+        segment_id=source_ref.segment_id,
+        content_hash=content_hash,
+        metadata={"source_type": source_ref.type, **source_ref.metadata},
     )
+
+
+def _segment_index(segments: list[object]) -> dict[str, dict[str, object]]:
+    indexed: dict[str, dict[str, object]] = {}
+    for segment in segments:
+        payload = segment.to_dict() if hasattr(segment, "to_dict") else segment  # type: ignore[attr-defined]
+        if not isinstance(payload, dict):
+            continue
+        segment_id = _optional_str(payload.get("segment_id") or payload.get("id"))
+        if segment_id:
+            indexed[segment_id] = dict(payload)
+    return indexed
+
+
+def _optional_str(value: object) -> str | None:
+    if value is None:
+        return None
+    text = str(value)
+    return text if text else None
+
+
+def _sha256_text(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 def _range_label(source_ref: IngestSourceRef) -> str | None:

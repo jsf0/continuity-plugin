@@ -143,6 +143,10 @@ class SourceRef:
     range: str | None = None
     label: str | None = None
     created_at: str | None = None
+    document_id: str | None = None
+    segment_id: str | None = None
+    content_hash: str | None = None
+    metadata: dict[str, object] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if not self.type.strip():
@@ -156,6 +160,10 @@ class SourceRef:
             "range": self.range,
             "label": self.label,
             "created_at": self.created_at,
+            "document_id": self.document_id,
+            "segment_id": self.segment_id,
+            "content_hash": self.content_hash,
+            "metadata": dict(self.metadata),
         }
 
     @classmethod
@@ -167,6 +175,10 @@ class SourceRef:
             range=_optional_str(value.get("range")),
             label=_optional_str(value.get("label")),
             created_at=_optional_str(value.get("created_at")),
+            document_id=_optional_str(value.get("document_id")),
+            segment_id=_optional_str(value.get("segment_id")),
+            content_hash=_optional_str(value.get("content_hash")),
+            metadata=_object_dict(value.get("metadata")),
         )
 
 

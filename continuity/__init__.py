@@ -31,6 +31,7 @@ from .tools import (
     handle_delete,
     handle_dream,
     handle_get,
+    handle_hydrate,
     handle_prune_stale,
     handle_quality_report,
     handle_reindex_vectors,
@@ -303,6 +304,7 @@ class ContinuityProvider(MemoryProvider):
             in {
                 "continuity_search",
                 "continuity_get",
+                "continuity_hydrate",
                 "continuity_add",
                 "continuity_delete",
                 "continuity_archive",
@@ -395,6 +397,8 @@ class ContinuityProvider(MemoryProvider):
             return json.dumps(handle_quality_report(self._store, args), ensure_ascii=False)
         if tool_name == "continuity_get" and self._store is not None:
             return json.dumps(handle_get(self._store, args), ensure_ascii=False)
+        if tool_name == "continuity_hydrate" and self._store is not None:
+            return json.dumps(handle_hydrate(self._store, args), ensure_ascii=False)
         if tool_name == "continuity_add" and self._store is not None:
             payload = handle_add(self._store, args)
             record = (

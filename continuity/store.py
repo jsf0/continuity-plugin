@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
 import uuid
@@ -12,7 +13,7 @@ from .association import association_strength
 from .models import AssociationEdge, ContextRecord, SkillLink, SourceRef, utc_now
 from .security import sanitize_observation_text
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 
 @dataclass(frozen=True)
@@ -145,6 +146,56 @@ class ContinuityStore:
                   value TEXT NOT NULL,
                   updated_at TEXT NOT NULL
                 );
+
+                CREATE TABLE IF NOT EXISTS corpus_documents (
+                  id TEXT PRIMARY KEY,
+                  uri TEXT NOT NULL,
+                  source_type TEXT NOT NULL,
+                  title TEXT,
+                  collection TEXT,
+                  scope_user TEXT,
+                  scope_project TEXT,
+                  scope_repo TEXT,
+                  scope_profile TEXT,
+                  content_hash TEXT NOT NULL,
+                  raw_text TEXT,
+                  rendered_text TEXT,
+                  metadata_json TEXT NOT NULL DEFAULT '{}',
+                  created_at TEXT NOT NULL,
+                  updated_at TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS corpus_segments (
+                  id TEXT PRIMARY KEY,
+                  document_id TEXT NOT NULL,
+                  kind TEXT NOT NULL,
+                  title TEXT,
+                  text TEXT NOT NULL,
+                  rendered_text TEXT,
+                  uri TEXT,
+                  line_start INTEGER,
+                  line_end INTEGER,
+                  page_start INTEGER,
+                  page_end INTEGER,
+                  content_hash TEXT NOT NULL,
+                  token_count INTEGER NOT NULL DEFAULT 0,
+                  metadata_json TEXT NOT NULL DEFAULT '{}',
+                  scope_user TEXT,
+                  scope_project TEXT,
+                  scope_repo TEXT,
+                  scope_profile TEXT,
+                  created_at TEXT NOT NULL,
+                  updated_at TEXT NOT NULL,
+                  FOREIGN KEY(document_id) REFERENCES corpus_documents(id) ON DELETE CASCADE
+                );
+
+                CREATE VIRTUAL TABLE IF NOT EXISTS corpus_segments_fts USING fts5(
+                  id UNINDEXED,
+                  document_id UNINDEXED,
+                  title,
+                  text,
+                  tokenize = "unicode61 tokenchars '_-:'"
+                );
                 """
             )
             _ensure_context_record_columns(
@@ -175,6 +226,10 @@ class ContinuityStore:
             )
             conn.execute(
                 "INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)",
+                (6, utc_now()),
+            )
+            conn.execute(
+                "INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)",
                 (SCHEMA_VERSION, utc_now()),
             )
 
@@ -200,6 +255,176 @@ class ContinuityStore:
                 """,
                 (key, value, now),
             )
+
+    def upsert_corpus_sources(self, documents: list[object], segments: list[object]) -> None:
+        """Store durable snapshots of ingested corpus documents and segments."""
+
+        now = utc_now()
+        with self.connect() as conn:
+            for document in documents:
+                payload = _model_dict(document)
+                document_id = str(payload.get("source_id") or payload.get("id") or "").strip()
+                uri = str(payload.get("uri") or "").strip()
+                source_type = str(payload.get("source_type") or "unknown")
+                if not document_id or not uri:
+                    continue
+                metadata = _object_dict(payload.get("metadata"))
+                raw_text = _optional_str(payload.get("raw_text") or payload.get("text"))
+                rendered_text = _optional_str(payload.get("rendered_text"))
+                content_hash = _sha256_text(
+                    raw_text or rendered_text or json.dumps(payload, sort_keys=True)
+                )
+                conn.execute(
+                    """
+                    INSERT INTO corpus_documents(
+                      id, uri, source_type, title, collection, scope_user, scope_project,
+                      scope_repo, scope_profile, content_hash, raw_text, rendered_text,
+                      metadata_json, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(id) DO UPDATE SET
+                      uri=excluded.uri,
+                      source_type=excluded.source_type,
+                      title=excluded.title,
+                      collection=excluded.collection,
+                      scope_user=excluded.scope_user,
+                      scope_project=excluded.scope_project,
+                      scope_repo=excluded.scope_repo,
+                      scope_profile=excluded.scope_profile,
+                      content_hash=excluded.content_hash,
+                      raw_text=excluded.raw_text,
+                      rendered_text=excluded.rendered_text,
+                      metadata_json=excluded.metadata_json,
+                      updated_at=excluded.updated_at
+                    """,
+                    (
+                        document_id,
+                        uri,
+                        source_type,
+                        _optional_str(payload.get("title")),
+                        _optional_str(payload.get("collection")),
+                        _optional_str(payload.get("scope_user")),
+                        _optional_str(payload.get("scope_project")),
+                        _optional_str(payload.get("scope_repo")),
+                        _optional_str(payload.get("scope_profile")),
+                        content_hash,
+                        raw_text,
+                        rendered_text,
+                        json.dumps(metadata, sort_keys=True),
+                        now,
+                        now,
+                    ),
+                )
+            for segment in segments:
+                payload = _model_dict(segment)
+                segment_id = str(payload.get("segment_id") or payload.get("id") or "").strip()
+                document_id = str(
+                    payload.get("source_id") or payload.get("document_id") or ""
+                ).strip()
+                text = str(payload.get("text") or "")
+                kind = str(payload.get("kind") or "unknown")
+                if not segment_id or not document_id:
+                    continue
+                location = _object_dict(payload.get("location"))
+                metadata = _object_dict(payload.get("metadata"))
+                rendered_text = _optional_str(payload.get("rendered_text"))
+                content_hash = _sha256_text(text)
+                conn.execute(
+                    """
+                    INSERT INTO corpus_segments(
+                      id, document_id, kind, title, text, rendered_text, uri, line_start,
+                      line_end, page_start, page_end, content_hash, token_count,
+                      metadata_json, scope_user, scope_project, scope_repo, scope_profile,
+                      created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(id) DO UPDATE SET
+                      document_id=excluded.document_id,
+                      kind=excluded.kind,
+                      title=excluded.title,
+                      text=excluded.text,
+                      rendered_text=excluded.rendered_text,
+                      uri=excluded.uri,
+                      line_start=excluded.line_start,
+                      line_end=excluded.line_end,
+                      page_start=excluded.page_start,
+                      page_end=excluded.page_end,
+                      content_hash=excluded.content_hash,
+                      token_count=excluded.token_count,
+                      metadata_json=excluded.metadata_json,
+                      scope_user=excluded.scope_user,
+                      scope_project=excluded.scope_project,
+                      scope_repo=excluded.scope_repo,
+                      scope_profile=excluded.scope_profile,
+                      updated_at=excluded.updated_at
+                    """,
+                    (
+                        segment_id,
+                        document_id,
+                        kind,
+                        _optional_str(payload.get("title")),
+                        text,
+                        rendered_text,
+                        _optional_str(location.get("uri")),
+                        _optional_int(location.get("line_start")),
+                        _optional_int(location.get("line_end")),
+                        _optional_int(location.get("page_start")),
+                        _optional_int(location.get("page_end")),
+                        content_hash,
+                        len(text.split()),
+                        json.dumps(metadata, sort_keys=True),
+                        _optional_str(payload.get("scope_user")),
+                        _optional_str(payload.get("scope_project")),
+                        _optional_str(payload.get("scope_repo")),
+                        _optional_str(payload.get("scope_profile")),
+                        now,
+                        now,
+                    ),
+                )
+                conn.execute("DELETE FROM corpus_segments_fts WHERE id = ?", (segment_id,))
+                conn.execute(
+                    "INSERT INTO corpus_segments_fts(id, document_id, title, text) VALUES (?, ?, ?, ?)",
+                    (segment_id, document_id, _optional_str(payload.get("title")) or "", text),
+                )
+
+    def get_corpus_segment(self, segment_id: str) -> dict[str, object] | None:
+        with self.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT s.*, d.uri AS document_uri, d.title AS document_title,
+                       d.source_type AS document_source_type, d.collection AS document_collection
+                FROM corpus_segments s
+                JOIN corpus_documents d ON d.id = s.document_id
+                WHERE s.id = ?
+                """,
+                (segment_id,),
+            ).fetchone()
+        return _corpus_segment_row_to_dict(row) if row else None
+
+    def hydrate_record_sources(
+        self, record_id: str, *, max_chars: int = 8000
+    ) -> list[dict[str, object]]:
+        record = self.get_record(record_id)
+        if record is None:
+            return []
+        hydrated: list[dict[str, object]] = []
+        remaining = max(0, max_chars)
+        for index, source in enumerate(record.sources):
+            segment_id = source.segment_id or source.id
+            if not segment_id:
+                continue
+            segment = self.get_corpus_segment(segment_id)
+            if segment is None:
+                continue
+            text = str(segment.get("text") or "")
+            truncated = len(text) > remaining if remaining >= 0 else False
+            segment["text"] = text[:remaining]
+            segment["truncated"] = truncated
+            segment["source_index"] = index
+            segment["record_source"] = source.to_dict()
+            hydrated.append(segment)
+            remaining -= len(str(segment["text"]))
+            if remaining <= 0:
+                break
+        return hydrated
 
     def upsert_record(
         self,
@@ -787,6 +1012,66 @@ class ContinuityStore:
                 _index_text(record.entities),
             ),
         )
+
+
+def _model_dict(value: object) -> dict[str, object]:
+    if hasattr(value, "to_dict"):
+        result = value.to_dict()  # type: ignore[attr-defined]
+        return dict(result) if isinstance(result, dict) else {}
+    return dict(value) if isinstance(value, dict) else {}
+
+
+def _object_dict(value: object) -> dict[str, object]:
+    return dict(value) if isinstance(value, dict) else {}
+
+
+def _optional_str(value: object) -> str | None:
+    if value is None:
+        return None
+    text = str(value)
+    return text if text else None
+
+
+def _optional_int(value: object) -> int | None:
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _sha256_text(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _corpus_segment_row_to_dict(row: sqlite3.Row) -> dict[str, object]:
+    return {
+        "segment_id": row["id"],
+        "document_id": row["document_id"],
+        "kind": row["kind"],
+        "title": row["title"],
+        "text": row["text"],
+        "rendered_text": row["rendered_text"],
+        "uri": row["uri"] or row["document_uri"],
+        "line_start": row["line_start"],
+        "line_end": row["line_end"],
+        "page_start": row["page_start"],
+        "page_end": row["page_end"],
+        "content_hash": row["content_hash"],
+        "token_count": row["token_count"],
+        "metadata": _json_object(row["metadata_json"]),
+        "scope_user": row["scope_user"],
+        "scope_project": row["scope_project"],
+        "scope_repo": row["scope_repo"],
+        "scope_profile": row["scope_profile"],
+        "document": {
+            "uri": row["document_uri"],
+            "title": row["document_title"],
+            "source_type": row["document_source_type"],
+            "collection": row["document_collection"],
+        },
+    }
 
 
 def _ensure_context_record_columns(conn: sqlite3.Connection, columns: dict[str, str]) -> None:
