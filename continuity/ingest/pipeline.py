@@ -14,6 +14,7 @@ from continuity.ingest.dedupe import BasicDeduper
 from continuity.ingest.eval import EvalCase, generate_eval_case
 from continuity.ingest.extractors import (
     CodeOrConfigFactExtractor,
+    ManPageFactExtractor,
     ProcedureCandidateExtractor,
     ProjectCapsuleExtractor,
 )
@@ -314,6 +315,8 @@ class IngestionPipeline:
         self, extractor_mode: str, llm_command: str | None, *, recipe: str
     ) -> list[object]:
         if extractor_mode == "deterministic":
+            if _is_manpage_recipe(recipe):
+                return [ManPageFactExtractor()]
             return [
                 ProjectCapsuleExtractor(),
                 ProcedureCandidateExtractor(),
@@ -330,12 +333,16 @@ class IngestionPipeline:
                 raise ValueError(
                     "deterministic,llm extractor requires an injected client or --llm-command"
                 )
-            return [
-                ProjectCapsuleExtractor(),
-                ProcedureCandidateExtractor(),
-                CodeOrConfigFactExtractor(),
-                LLMCandidateExtractor(client, recipe=recipe),
-            ]
+            deterministic_extractors = (
+                [ManPageFactExtractor()]
+                if _is_manpage_recipe(recipe)
+                else [
+                    ProjectCapsuleExtractor(),
+                    ProcedureCandidateExtractor(),
+                    CodeOrConfigFactExtractor(),
+                ]
+            )
+            return [*deterministic_extractors, LLMCandidateExtractor(client, recipe=recipe)]
         raise ValueError("unknown extractor mode")
 
 

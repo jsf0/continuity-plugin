@@ -153,7 +153,7 @@ Use local or intentionally tunneled endpoints for private corpora. Source text a
 
 ## Raw manpage ingestion
 
-The `manpage` and `openbsd-manpages` recipes can ingest raw roff manual sources such as `ifconfig.8` and `route.8.in`. The local file connector classifies numeric manual suffixes as `manpage`; the parser renders them with `groff -mandoc -Tutf8` piped through `col -b` when those tools are available, then segments by manual sections.
+The `manpage` and `openbsd-manpages` recipes can ingest raw roff manual sources such as `ifconfig.8` and `route.8.in`. The local file connector classifies numeric manual suffixes as `manpage`; the parser renders them with `groff -mandoc -Tutf8` piped through `col -b` when those tools are available, then segments by manual sections. The deterministic manpage extractor emits compact candidates for useful sections such as `NAME`, `SYNOPSIS`, `DESCRIPTION`, `FILES`, `EXIT STATUS`, `EXAMPLES`, `CAVEATS`, and `BUGS`.
 
 ```bash
 uv run continuity-ingest run /path/to/manpages \

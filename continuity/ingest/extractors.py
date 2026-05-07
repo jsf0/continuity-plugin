@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from typing import ClassVar
 
 from continuity.ingest.models import (
     CandidateRecord,
@@ -136,6 +137,55 @@ class CodeOrConfigFactExtractor:
         return candidates
 
 
+class ManPageFactExtractor:
+    """Extract compact records from rendered manual-page sections."""
+
+    name = "manpage-fact"
+    useful_sections: ClassVar[set[str]] = {
+        "NAME",
+        "SYNOPSIS",
+        "DESCRIPTION",
+        "FILES",
+        "EXIT STATUS",
+        "EXAMPLES",
+        "CAVEATS",
+        "BUGS",
+    }
+
+    def extract(self, segment: SourceSegment, document: SourceDocument) -> list[CandidateRecord]:
+        if segment.kind != "manpage_section":
+            return []
+        section = str(segment.metadata.get("manpage_section") or segment.title or "").upper()
+        if section not in self.useful_sections:
+            return []
+        manpage_name = str(segment.metadata.get("manpage_name") or _manpage_name(document))
+        summary = _compact_lines(segment.text, max_lines=3)
+        if not summary:
+            return []
+        kind = "glossary_term" if section == "NAME" else "codebase_fact"
+        tags = ["manpage", "manual-section", section.lower().replace(" ", "-")]
+        return [
+            CandidateRecord(
+                candidate_id=stable_id(self.name, segment.segment_id, section, manpage_name),
+                kind=kind,
+                title=f"Manpage {section}: {manpage_name}",
+                summary=summary,
+                details=f"Extracted from {document.uri} section {section}.",
+                scope_project=document.scope_project,
+                scope_repo=document.scope_repo,
+                scope_user=document.scope_user,
+                scope_profile=document.scope_profile,
+                tags=tags,
+                entities=[manpage_name, section],
+                confidence=0.82,
+                importance=0.62,
+                trust_level="corpus_distilled",
+                source_refs=[_source_ref(document, segment)],
+                ingestion={"extractor": self.name},
+            )
+        ]
+
+
 class EvalCaseGenerator:
     """Generate simple positive retrieval eval cases from candidate records."""
 
@@ -184,3 +234,8 @@ def _first_sentence_or_line(text: str) -> str:
 def _compact_lines(text: str, *, max_lines: int) -> str:
     lines = [line.strip() for line in text.splitlines() if line.strip()]
     return " ".join(lines[:max_lines])
+
+
+def _manpage_name(document: SourceDocument) -> str:
+    title = document.title or document.source_id.rsplit("/", 1)[-1]
+    return re.sub(r"\.[1-9](?:\.in|\.txt)?$", "", title)

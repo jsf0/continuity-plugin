@@ -242,6 +242,11 @@ def test_pipeline_ingests_raw_manpage_sources(tmp_path) -> None:
 
     inventory = read_jsonl(output_dir / "inventory.jsonl")
     segments = read_jsonl(output_dir / "segments.jsonl")
+    candidates = read_jsonl(output_dir / "candidate-records.jsonl")
     assert result.manifest.source_count == 1
     assert inventory[0]["source_type"] == "manpage"
     assert {segment["title"] for segment in segments} >= {"NAME", "SYNOPSIS", "DESCRIPTION"}
+    assert {candidate["title"] for candidate in candidates} >= {
+        "Manpage NAME: ifconfig",
+        "Manpage SYNOPSIS: ifconfig",
+    }
