@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
+
+import pytest
 
 from continuity.ingest.models import SourceDocument
 from continuity.ingest.parsers import ManPageParser, MarkdownParser, TextParser, parser_for_document
@@ -135,3 +138,44 @@ def test_parser_for_document_uses_manpage_recipe_for_text_documents() -> None:
     assert isinstance(
         parser_for_document(_document("notes.txt", "text"), recipe="manpage"), ManPageParser
     )
+
+
+@pytest.mark.skipif(
+    shutil.which("groff") is None or shutil.which("col") is None, reason="groff/col not installed"
+)
+def test_man_page_parser_renders_raw_roff_source(tmp_path) -> None:
+    path = tmp_path / "ifconfig.8"
+    path.write_text(
+        ".Dd May 6, 2026\n"
+        ".Dt IFCONFIG 8\n"
+        ".Os\n"
+        ".Sh NAME\n"
+        ".Nm ifconfig\n"
+        ".Nd configure network interface parameters\n"
+        ".Sh SYNOPSIS\n"
+        ".Nm ifconfig\n"
+        ".Ar interface alias address\n"
+        ".Sh DESCRIPTION\n"
+        ".Nm\n"
+        "configures network interface parameters.\n",
+        encoding="utf-8",
+    )
+    document = SourceDocument(
+        source_id="file://ifconfig.8",
+        source_type="manpage",
+        uri="file://ifconfig.8",
+        title="ifconfig.8",
+        metadata={"path": str(path), "relative_path": "ifconfig.8"},
+    )
+
+    parsed = ManPageParser().parse(document)
+
+    headings = [block.text for block in parsed.blocks if block.kind == "heading"]
+    assert "NAME" in headings
+    assert "SYNOPSIS" in headings
+    assert any("interface alias address" in block.text for block in parsed.blocks)
+    assert parsed.metadata["rendered_from"] == "roff"
+
+
+def test_parser_for_document_uses_manpage_source_type() -> None:
+    assert isinstance(parser_for_document(_document("ifconfig.8", "manpage")), ManPageParser)

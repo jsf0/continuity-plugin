@@ -55,4 +55,6 @@ def test_infer_source_type_from_extension() -> None:
     assert infer_source_type(Path("README.md")) == "markdown"
     assert infer_source_type(Path("notes.txt")) == "text"
     assert infer_source_type(Path("guide.rst")) == "rst"
+    assert infer_source_type(Path("ifconfig.8")) == "manpage"
+    assert infer_source_type(Path("route.8.in")) == "manpage"
     assert infer_source_type(Path("unknown.bin")) == "binary"

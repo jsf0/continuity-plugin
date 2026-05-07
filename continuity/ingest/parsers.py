@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import re
+import shutil
+import subprocess
 from pathlib import Path
 from typing import ClassVar
 
@@ -149,11 +151,11 @@ class ManPageParser:
     """Line-oriented parser for rendered Unix manual pages."""
 
     name = "manpage"
-    supported_types: ClassVar[list[str]] = ["text"]
+    supported_types: ClassVar[list[str]] = ["text", "manpage"]
 
     def parse(self, document: SourceDocument) -> ParsedDocument:
         path = _path_from_document(document)
-        text = path.read_text(encoding="utf-8")
+        text, rendered_from = _manpage_text(path, document)
         blocks: list[ParsedBlock] = []
         for line_number, line in enumerate(text.splitlines(), start=1):
             stripped = _clean_manpage_line(line)
@@ -185,7 +187,7 @@ class ManPageParser:
             title=document.title,
             text=text,
             blocks=blocks,
-            metadata={"parser": self.name},
+            metadata={"parser": self.name, "rendered_from": rendered_from},
         )
 
 
@@ -194,11 +196,41 @@ def parser_for_document(
 ) -> MarkdownParser | TextParser | ManPageParser:
     """Return the default parser for a source document."""
 
-    if recipe in {"manpage", "openbsd-manpages"}:
+    if recipe in {"manpage", "openbsd-manpages"} or document.source_type == "manpage":
         return ManPageParser()
     if document.source_type in {"markdown", "rst"}:
         return MarkdownParser()
     return TextParser()
+
+
+def _manpage_text(path: Path, document: SourceDocument) -> tuple[str, str]:
+    if document.source_type != "manpage":
+        return path.read_text(encoding="utf-8"), "text"
+    if shutil.which("groff") is None or shutil.which("col") is None:
+        return path.read_text(encoding="utf-8"), "roff-unrendered"
+    try:
+        groff = subprocess.run(
+            ["groff", "-mandoc", "-Tutf8", str(path)],
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=30,
+        )
+        if groff.returncode != 0:
+            return path.read_text(encoding="utf-8"), "roff-unrendered"
+        col = subprocess.run(
+            ["col", "-b"],
+            input=groff.stdout,
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=30,
+        )
+        if col.returncode != 0:
+            return groff.stdout, "roff"
+        return col.stdout, "roff"
+    except (OSError, subprocess.SubprocessError, TimeoutError):
+        return path.read_text(encoding="utf-8"), "roff-unrendered"
 
 
 def _is_manpage_heading(line: str) -> bool:

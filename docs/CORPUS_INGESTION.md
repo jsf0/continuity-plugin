@@ -151,6 +151,21 @@ uv run continuity-ingest run /path/to/corpus \
 
 Use local or intentionally tunneled endpoints for private corpora. Source text and LLM output are treated as untrusted data and still pass through normalization, safety gates, quality gates, dedupe, and review.
 
+## Raw manpage ingestion
+
+The `manpage` and `openbsd-manpages` recipes can ingest raw roff manual sources such as `ifconfig.8` and `route.8.in`. The local file connector classifies numeric manual suffixes as `manpage`; the parser renders them with `groff -mandoc -Tutf8` piped through `col -b` when those tools are available, then segments by manual sections.
+
+```bash
+uv run continuity-ingest run /path/to/manpages \
+  --recipe manpage \
+  --include '**/*.[1-9]' \
+  --context os=openbsd \
+  --partition-key os \
+  --collision-risk high \
+  --policy require-review \
+  --output /tmp/continuity-ingest-openbsd-manpages
+```
+
 ## Refresh changed corpora
 
 Compare a later scan with a previous inventory:

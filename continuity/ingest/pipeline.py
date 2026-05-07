@@ -39,7 +39,7 @@ from continuity.ingest.review import ReviewPolicy, ReviewResult, write_review_ar
 from continuity.ingest.segmenters import HeadingSectionSegmenter, ManPageSectionSegmenter
 from continuity.ingest.validation import CandidateNormalizer, SafetyGate
 
-_PARSEABLE_SOURCE_TYPES = {"markdown", "rst", "text"}
+_PARSEABLE_SOURCE_TYPES = {"markdown", "rst", "text", "manpage"}
 
 
 @dataclass(frozen=True)

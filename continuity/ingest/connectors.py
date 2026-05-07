@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from collections.abc import Iterable
 from pathlib import Path
 
 from continuity.ingest.models import SourceDocument
+
+_MANPAGE_SUFFIX_RE = re.compile(r"\.[1-9](?:\.in)?$")
 
 _SOURCE_TYPES_BY_SUFFIX = {
     ".md": "markdown",
@@ -19,7 +22,10 @@ _SOURCE_TYPES_BY_SUFFIX = {
 def infer_source_type(path: Path) -> str:
     """Infer a coarse source type from a file path."""
 
-    return _SOURCE_TYPES_BY_SUFFIX.get(path.suffix.lower(), "binary")
+    suffix = path.suffix.lower()
+    if _MANPAGE_SUFFIX_RE.search(path.name.lower()):
+        return "manpage"
+    return _SOURCE_TYPES_BY_SUFFIX.get(suffix, "binary")
 
 
 class LocalFilesConnector:

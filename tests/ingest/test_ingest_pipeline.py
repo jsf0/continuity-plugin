@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
+
+import pytest
 
 from continuity.ingest.jsonl import read_jsonl
 from continuity.ingest.pipeline import IngestionPipeline, run_dry_inventory_and_segment
@@ -204,3 +207,41 @@ def test_pipeline_preserves_context_on_candidate_source_refs(tmp_path) -> None:
     candidates = read_jsonl(output_dir / "candidate-records.jsonl")
 
     assert candidates[0]["source_refs"][0]["metadata"]["context"]["labels"] == {"customer": "acme"}
+
+
+@pytest.mark.skipif(
+    shutil.which("groff") is None or shutil.which("col") is None, reason="groff/col not installed"
+)
+def test_pipeline_ingests_raw_manpage_sources(tmp_path) -> None:
+    corpus = tmp_path / "manpages"
+    corpus.mkdir()
+    (corpus / "ifconfig.8").write_text(
+        ".Dd May 6, 2026\n"
+        ".Dt IFCONFIG 8\n"
+        ".Os\n"
+        ".Sh NAME\n"
+        ".Nm ifconfig\n"
+        ".Nd configure network interface parameters\n"
+        ".Sh SYNOPSIS\n"
+        ".Nm ifconfig\n"
+        ".Ar interface alias address\n"
+        ".Sh DESCRIPTION\n"
+        ".Nm\n"
+        "configures network interface parameters.\n",
+        encoding="utf-8",
+    )
+    output_dir = tmp_path / "run-manpage"
+
+    result = IngestionPipeline().run_dry_inventory_and_segment(
+        roots=[corpus],
+        output_dir=output_dir,
+        recipe="manpage",
+        include=["*.8"],
+        context={"labels": {"os": "openbsd"}, "partition_keys": ["os"], "collision_risk": "high"},
+    )
+
+    inventory = read_jsonl(output_dir / "inventory.jsonl")
+    segments = read_jsonl(output_dir / "segments.jsonl")
+    assert result.manifest.source_count == 1
+    assert inventory[0]["source_type"] == "manpage"
+    assert {segment["title"] for segment in segments} >= {"NAME", "SYNOPSIS", "DESCRIPTION"}
