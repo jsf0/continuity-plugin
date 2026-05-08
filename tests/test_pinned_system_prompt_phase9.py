@@ -93,6 +93,10 @@ def test_system_prompt_block_includes_continuity_guidance_when_pinning_disabled(
     assert "CONTINUITY MEMORY PROVIDER" in block
     assert "Routine memory writes: use the memory tool" in block
     assert "Routine memory recall: read any provided <memory-context> first" in block
+    assert "Continuity-first source use" in block
+    assert "hydrate the best record(s) with continuity_hydrate before using" in block
+    assert "This is a priority order, not a ban" in block
+    assert "when continuity is missing, ambiguous, stale, insufficient" in block
     assert "use continuity_status, continuity_search, or continuity_debug_retrieval" in block
     assert "When asked whether continuity helped" in block
     assert "inspect recent retrieval events" in block

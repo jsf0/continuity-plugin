@@ -401,6 +401,7 @@ class ContinuityRetriever:
             effective_query_context,
             expanded_tokens,
             self.store.list_records(),
+            query=query,
             include_stale=include_stale,
         )
         effective_comparison_intent = comparison_intent or has_comparison_intent(query)
@@ -630,7 +631,7 @@ class ContinuityRetriever:
             personal_query=personal_query,
             include_stale=include_stale,
         )
-        selected.sort(key=lambda candidate: (-candidate.total, candidate.record.id))
+        selected.sort(key=_candidate_selection_sort_key)
         selected = _suppress_duplicate_families(selected)
         rejected.sort(key=lambda candidate: (-candidate.total, candidate.record.id))
         return {
@@ -861,7 +862,12 @@ class ContinuityRetriever:
             if any(
                 edge.get("edge_type") == "source_reference" for edge in candidate.activation_trace
             ):
-                candidate.metadata_boost = max(0.0, candidate.metadata_boost)
+                if any(
+                    reason.startswith("context_label_conflict:") for reason in candidate.reasons
+                ):
+                    candidate.metadata_boost = 0.0
+                else:
+                    candidate.metadata_boost = max(0.0, candidate.metadata_boost)
                 candidate.reasons.append("source_reference_context_bridge")
             candidate.association_score = activation
             candidate.reasons.append("associative_graph")
@@ -882,6 +888,7 @@ def _infer_query_context_from_record_labels(
     tokens: set[str],
     records: list[ContextRecord],
     *,
+    query: str = "",
     include_stale: bool,
 ) -> ContextLabelSet:
     """Infer explicit query context from label values present in the query text.
@@ -893,6 +900,7 @@ def _infer_query_context_from_record_labels(
     """
 
     inferred: dict[str, str] = dict(query_context.labels)
+    query_lower = query.casefold()
     explicit_keys = set(query_context.labels)
     ambiguous_keys: set[str] = set()
     partition_keys: set[str] = set(query_context.partition_keys)
@@ -902,11 +910,19 @@ def _infer_query_context_from_record_labels(
             continue
         record_context = context_from_record(record)
         for key, value in record_context.labels.items():
-            if key in explicit_keys or value not in tokens:
+            value_matches_query = value in tokens or (
+                any(char in value for char in ".-_/:") and value.casefold() in query_lower
+            )
+            if key in explicit_keys or not value_matches_query:
                 continue
             previous = inferred.get(key)
             if previous is not None and previous != value:
-                ambiguous_keys.add(key)
+                previous_specificity = _label_value_query_specificity(previous, query_lower, tokens)
+                value_specificity = _label_value_query_specificity(value, query_lower, tokens)
+                if value_specificity > previous_specificity:
+                    inferred[key] = value
+                elif value_specificity == previous_specificity:
+                    ambiguous_keys.add(key)
                 continue
             inferred[key] = value
             if key in record_context.partition_keys:
@@ -919,6 +935,14 @@ def _infer_query_context_from_record_labels(
         partition_keys.discard(key)
         identity_keys.discard(key)
 
+    if (
+        "command" in inferred
+        and "manual_section" not in inferred
+        and {"file", "format"}.issubset(tokens)
+    ):
+        inferred["manual_section"] = "5"
+        identity_keys.add("manual_section")
+
     if inferred == query_context.labels:
         return query_context
 
@@ -929,6 +953,27 @@ def _infer_query_context_from_record_labels(
         identity_keys=frozenset(key for key in identity_keys if key in inferred),
         collision_risk=query_context.collision_risk,
     )
+
+
+def _candidate_selection_sort_key(candidate: CandidateScore) -> tuple[int, float, str]:
+    exact_identity_match = (
+        candidate.retrieval_role == "direct_seed"
+        and not any(reason.startswith("context_label_conflict:") for reason in candidate.reasons)
+        and (
+            "context_label_match:command" in candidate.reasons
+            or "context_label_match:manual_section" in candidate.reasons
+        )
+    )
+    return (-int(exact_identity_match), -candidate.total, candidate.record.id)
+
+
+def _label_value_query_specificity(value: str, query_lower: str, tokens: set[str]) -> int:
+    score = 0
+    if value in tokens:
+        score = max(score, len(value))
+    if any(char in value for char in ".-_/:") and value.casefold() in query_lower:
+        score = max(score, 1000 + len(value))
+    return score
 
 
 def _apply_context_compatibility(

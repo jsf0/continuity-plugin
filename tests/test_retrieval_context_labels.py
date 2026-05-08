@@ -178,6 +178,44 @@ def test_query_terms_infer_context_for_high_collision_manpage_records(tmp_path: 
     assert rejected["openbsd_fdisk_8"] == "context_label_conflict:command"
 
 
+def test_source_reference_neighbors_do_not_outrank_exact_identity_matches(
+    tmp_path: Path,
+) -> None:
+    daemon = make_manpage_record(
+        "openbsd_relayd_8",
+        command="relayd",
+        manual_section="8",
+        summary="OpenBSD relayd daemon reads relayd.conf tables and protocols.",
+    )
+    relayd_conf = make_manpage_record(
+        "openbsd_relayd_conf_5",
+        command="relayd.conf",
+        manual_section="5",
+        summary="OpenBSD relayd.conf defines relay tables, protocols, and forwarding rules.",
+    )
+    store = seeded_store(tmp_path, [daemon, relayd_conf])
+    store.upsert_association_edge(
+        "openbsd_relayd_8",
+        "openbsd_relayd_conf_5",
+        strength=0.95,
+        edge_type="source_reference",
+    )
+
+    debug = ContinuityRetriever(store, association_enabled=True).debug_search(
+        "OpenBSD relayd.conf table protocol forward to",
+        query_context={
+            "labels": {"os": "openbsd", "command": "relayd.conf", "manual_section": "5"},
+            "partition_keys": ["os"],
+            "identity_keys": ["command", "manual_section"],
+            "collision_risk": "high",
+        },
+        limit=10,
+    )
+
+    selected_ids = [candidate.record.id for candidate in debug["selected"]]
+    assert selected_ids[:2] == ["openbsd_relayd_conf_5", "openbsd_relayd_8"]
+
+
 def test_source_reference_edges_can_bridge_related_manpage_identity_contexts(
     tmp_path: Path,
 ) -> None:
@@ -259,6 +297,100 @@ def test_query_terms_complete_partial_context_for_high_collision_records(tmp_pat
     assert [candidate.record.id for candidate in debug["selected"]] == ["openbsd_ldomctl_8"]
     rejected = {candidate.record.id: candidate.rejected_reason for candidate in debug["rejected"]}
     assert rejected["openbsd_fdisk_8"] == "context_label_conflict:command"
+
+
+def test_exact_punctuated_label_terms_infer_high_collision_context(tmp_path: Path) -> None:
+    store = seeded_store(
+        tmp_path,
+        [
+            make_manpage_record(
+                "openbsd_pf_conf_5",
+                command="pf.conf",
+                manual_section="5",
+                summary="OpenBSD pf.conf packet filter configuration syntax.",
+            ),
+            make_manpage_record(
+                "openbsd_smtpd_conf_5",
+                command="smtpd.conf",
+                manual_section="5",
+                summary="OpenBSD smtpd.conf mail daemon configuration syntax.",
+            ),
+        ],
+    )
+
+    debug = ContinuityRetriever(store, association_enabled=False).debug_search(
+        "OpenBSD pf.conf syntax",
+        limit=10,
+    )
+
+    assert [candidate.record.id for candidate in debug["selected"]] == ["openbsd_pf_conf_5"]
+    rejected = {candidate.record.id: candidate.rejected_reason for candidate in debug["rejected"]}
+    assert rejected["openbsd_smtpd_conf_5"] == "context_label_conflict:command"
+
+
+def test_specific_punctuated_label_beats_shorter_label_terms(tmp_path: Path) -> None:
+    store = seeded_store(
+        tmp_path,
+        [
+            make_manpage_record(
+                "openbsd_relayd_conf_5",
+                command="relayd.conf",
+                manual_section="5",
+                summary="OpenBSD relayd.conf defines relay tables and protocols.",
+            ),
+            make_manpage_record(
+                "openbsd_table_5",
+                command="table",
+                manual_section="5",
+                summary="OpenBSD table file format documentation.",
+            ),
+            make_manpage_record(
+                "openbsd_relayd_8",
+                command="relayd",
+                manual_section="8",
+                summary="OpenBSD relayd daemon documentation.",
+            ),
+        ],
+    )
+
+    debug = ContinuityRetriever(store, association_enabled=False).debug_search(
+        "OpenBSD relayd.conf table protocol forward to",
+        limit=10,
+    )
+
+    assert [candidate.record.id for candidate in debug["selected"]] == ["openbsd_relayd_conf_5"]
+    rejected = {candidate.record.id: candidate.rejected_reason for candidate in debug["rejected"]}
+    assert rejected["openbsd_table_5"] == "context_label_conflict:command"
+    assert rejected["openbsd_relayd_8"] == "context_label_conflict:command"
+
+
+def test_file_format_query_prefers_section_five_over_same_named_command(tmp_path: Path) -> None:
+    store = seeded_store(
+        tmp_path,
+        [
+            make_manpage_record(
+                "openbsd_group_5",
+                command="group",
+                manual_section="5",
+                summary="OpenBSD group file format for /etc/group.",
+            ),
+            make_manpage_record(
+                "openbsd_group_8",
+                command="group",
+                manual_section="8",
+                summary="OpenBSD group user management command.",
+            ),
+        ],
+    )
+
+    debug = ContinuityRetriever(store, association_enabled=False).debug_search(
+        "OpenBSD group file format",
+        limit=10,
+    )
+
+    assert [candidate.record.id for candidate in debug["selected"]] == ["openbsd_group_5"]
+    rejected = {candidate.record.id: candidate.rejected_reason for candidate in debug["rejected"]}
+    assert rejected["openbsd_group_8"] == "context_label_conflict:manual_section"
 
 
 def test_identity_query_context_rejects_other_manpage_commands(tmp_path: Path) -> None:
