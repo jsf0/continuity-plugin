@@ -141,10 +141,10 @@ Initial alpha release of Hermes Continuity Memory: a local-first structured memo
 - built-in memory mirroring
 - skill links
 - stale-memory lifecycle
+- review-first corpus ingestion with explicit import
 
 ## Limitations
-
-- no repository/document ingestion yet
+- corpus ingestion is offline/review-first; no automatic background indexing
 - no broad LLM summarization yet
 - no multi-user ACLs
 - retrieval quality is intentionally conservative and still tuning-sensitive

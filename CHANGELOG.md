@@ -32,6 +32,8 @@ behavior while the provider API is still stabilizing.
   `archived_at`) with archive/restore and conservative stale-prune tooling.
 - Retrieval excludes archived, retracted, and expired records by default while
   allowing explicit `include_stale` inspection.
+- Review-first corpus ingestion pipeline for local files, notes, markdown/text,
+  and manpage-style sources, with temporary validation and explicit import.
 - Pinned system-prompt records plus compact provider-owned continuity guidance that
   remains active even when pinned records are disabled.
 - Retrieval-noise gates for weak vector-only hits, generic memory-meta queries,
@@ -52,7 +54,8 @@ behavior while the provider API is still stabilizing.
 
 - Neural embeddings, reranking, and association graph traversal are optional
   local backends that require extra dependencies and tuning.
-- No repository/document ingestion yet.
+- Corpus ingestion is offline and review-first; it does not automatically index
+  live repositories or private documents in the background.
 - No broad LLM-based automatic session summarization yet.
 - No multi-user ACL model.
 - No automatic skill loading from skill links.
