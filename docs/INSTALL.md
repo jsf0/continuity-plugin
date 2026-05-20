@@ -1,15 +1,17 @@
-# Installation
+# Installation, verification, upgrade, and uninstall
+
+This guide installs the continuity memory provider into a local Hermes Agent home. The installer copies plugin code only; it does not edit your Hermes config and does not delete memory data.
 
 ## Prerequisites
 
 - Hermes Agent installed locally.
 - Python 3.11+.
 - `bash` for helper scripts.
-- `uv` for development/test commands.
+- `uv` for development, tests, and package builds.
 
-The plugin itself has no runtime Python dependencies beyond the standard library.
+The plugin runtime uses only the Python standard library by default. Optional neural embeddings/reranking require extra packages.
 
-## Install into Hermes
+## Quick install
 
 From a checkout of this repository:
 
@@ -17,19 +19,19 @@ From a checkout of this repository:
 ./scripts/install.sh
 ```
 
-By default, this installs to:
+By default, this copies the plugin package to:
 
 ```text
-~/.hermes/plugins/continuity/
+${HERMES_HOME:-$HOME/.hermes}/plugins/continuity/
 ```
 
-To install into a different Hermes home:
+Install into a different Hermes home:
 
 ```bash
 HERMES_HOME=/path/to/hermes-home ./scripts/install.sh
 ```
 
-Preview without writing:
+Preview the copy operation without writing files:
 
 ```bash
 ./scripts/install.sh --dry-run
@@ -43,7 +45,14 @@ Edit your main Hermes config, usually:
 $EDITOR ~/.hermes/config.yaml
 ```
 
-Add or update the `memory` block:
+Minimal config:
+
+```yaml
+memory:
+  provider: continuity
+```
+
+Recommended dependency-free first-install config:
 
 ```yaml
 memory:
@@ -53,14 +62,14 @@ memory:
     max_chars: 1800
     min_score: 0.1
     include_sources: true
-    include_scores: true
+    include_scores: false
 
     # Dependency-free local vectors. Good default for first install.
     vector:
       enabled: true
       backend: sqlite-hash
 
-    # Optional: enable only after installing sentence-transformers deps.
+    # Optional: enable only after installing sentence-transformers dependencies.
     reranker:
       enabled: false
       backend: none
@@ -71,10 +80,13 @@ memory:
     # Tier 0 memory: tiny, high-trust continuity records pinned every turn.
     pinned_system_prompt:
       enabled: true
+      include_records: true
       max_chars: 1200
-      max_records: 6
+      max_records: 5
+      kinds: [user_preference, project_convention]
+      min_importance: 0.75
 
-    # Optional maintenance cycle. Manual `continuity_dream` works regardless;
+    # Optional maintenance cycle. Manual continuity_dream works regardless;
     # scheduled checks run only when Hermes initializes or processes turns.
     dream:
       enabled: false
@@ -83,12 +95,18 @@ memory:
       mode: report
 ```
 
-The installer deliberately does **not** edit this file. Then restart Hermes or start a new session.
+Then restart Hermes or start a new session.
 
-This is intended to replace stock Hermes memory as the primary memory provider:
-`memory.provider: continuity` routes memory writes and retrieval through
-continuity. Existing built-in memory can be mirrored or migrated, but avoid
-keeping a second large always-on built-in memory prompt alongside continuity.
+## Production memory model
+
+This plugin is intended to replace stock Hermes memory as the primary memory provider:
+
+```yaml
+memory:
+  provider: continuity
+```
+
+Existing stock memory can be mirrored or migrated, but avoid keeping a second large always-on memory prompt alongside continuity. Continuity keeps a tiny optional Tier 0 prompt plus per-turn retrieval for the long tail.
 
 ## Verify installation
 
@@ -98,54 +116,191 @@ Run the repository smoke test:
 ./scripts/smoke-test.sh
 ```
 
-The script:
-
-1. Creates a temporary `HERMES_HOME`.
-2. Installs the plugin there.
-3. Loads the provider directly, or through Hermes' plugin loader when Hermes is
-   available under `~/.hermes/hermes-agent`.
-4. Initializes the provider.
-5. Adds, gets, searches, prefetches, and deletes a record.
-6. Verifies skill-link prefetch behavior.
-7. Verifies mirrored built-in memory writes.
-8. Builds a wheel with `uv` when available and checks `plugin.yaml` / `py.typed` packaging.
-
-Expected output ends with:
+Expected final line:
 
 ```text
 smoke test ok
 ```
 
-## Try the synthetic retrieval demo
+The smoke test creates a temporary `HERMES_HOME`, installs the plugin there, loads the provider, exercises add/search/prefetch/delete, verifies memory mirroring and skill-link output, builds a wheel when `uv` is available, and checks package metadata.
 
-To verify retrieval, lifecycle operations, and report-only dream maintenance without waiting to build up real memories, run:
+## Verify import path manually
+
+After installing, verify Python imports the installed plugin copy rather than the repository checkout:
 
 ```bash
-python scripts/demo-retrieval.py
-# or, with uv if available:
+cd /tmp
+PYTHONPATH="${HERMES_HOME:-$HOME/.hermes}/plugins" python - <<'PY'
+import continuity
+print(continuity.__file__)
+PY
+```
+
+Expected path shape:
+
+```text
+.../.hermes/plugins/continuity/__init__.py
+```
+
+## Try the synthetic retrieval demo
+
+The public demo uses only synthetic JSONL records and a temporary database:
+
+```bash
 ./scripts/demo-retrieval.sh
 ```
 
-The demo uses only synthetic public records in `examples/demo_memory/`. It creates a temporary `HERMES_HOME`, loads `records.jsonl`, runs query expectations from `queries.jsonl`, exercises add/search/archive/restore/delete, runs a report-only dream cycle, and removes the temporary DB when done.
+Quiet mode:
 
-Expected output ends with:
+```bash
+./scripts/demo-retrieval.sh --quiet
+```
+
+Expected final line:
 
 ```text
 demo retrieval ok
 ```
 
-## Uninstall
-
-Remove the installed plugin directory:
+Show the compact context block a small model would receive:
 
 ```bash
-rm -rf "$HERMES_HOME/plugins/continuity"
+python scripts/demo-small-model-context.py
 ```
 
-This does not remove runtime memory data. To remove the continuity DB too:
+Expected final line:
+
+```text
+small model context demo ok
+```
+
+See `docs/DEMO.md` for a walkthrough.
+
+## Data locations
+
+Plugin code:
+
+```text
+${HERMES_HOME:-$HOME/.hermes}/plugins/continuity/
+```
+
+Runtime database:
+
+```text
+${HERMES_HOME:-$HOME/.hermes}/continuity/continuity.db
+```
+
+Removing plugin code does not remove runtime memory data.
+
+## Upgrade
+
+From the repository root:
 
 ```bash
-rm -rf "$HERMES_HOME/continuity"
+git pull
+./scripts/install.sh
 ```
 
-Be careful: deleting `$HERMES_HOME/continuity` removes stored continuity memory.
+Restart Hermes or start a new session.
+
+The installer replaces the installed plugin code directory. It does not edit config and does not delete the runtime database.
+
+Before major upgrades, back up the database:
+
+```bash
+cp "${HERMES_HOME:-$HOME/.hermes}/continuity/continuity.db" continuity.db.backup
+```
+
+## Roll back
+
+Check out a previous tag or commit and reinstall:
+
+```bash
+git checkout <previous-tag-or-commit>
+./scripts/install.sh
+```
+
+Restart Hermes or start a new session. Keep database backups before rolling across schema changes.
+
+## Uninstall plugin code only
+
+Use the helper script:
+
+```bash
+./scripts/uninstall.sh
+```
+
+Or remove the installed plugin directory manually:
+
+```bash
+rm -rf "${HERMES_HOME:-$HOME/.hermes}/plugins/continuity"
+```
+
+Then remove or change the `memory.provider: continuity` config block in your Hermes config and restart Hermes.
+
+This does not remove stored continuity memory.
+
+## Wipe continuity memory data
+
+Warning: this deletes stored continuity records, source references, vectors, retrieval logs, and maintenance state.
+
+Use the helper script with an explicit flag:
+
+```bash
+./scripts/uninstall.sh --remove-data
+```
+
+Or remove the data directory manually:
+
+```bash
+rm -rf "${HERMES_HOME:-$HOME/.hermes}/continuity"
+```
+
+## Install optional neural embeddings/reranking dependencies
+
+The default install does not require ML dependencies. To experiment with `sentence-transformers` vectors or reranking in a development checkout:
+
+```bash
+uv sync --extra embeddings --dev
+```
+
+Then configure, for example:
+
+```yaml
+memory:
+  provider: continuity
+  continuity:
+    vector:
+      enabled: true
+      backend: sentence-transformers
+      embedding_model: BAAI/bge-small-en-v1.5
+    reranker:
+      enabled: true
+      backend: sentence-transformers
+      model: BAAI/bge-reranker-base
+```
+
+Use `sqlite-hash` first unless you specifically need neural retrieval.
+
+## Troubleshooting quick checks
+
+Check installed files:
+
+```bash
+find "${HERMES_HOME:-$HOME/.hermes}/plugins/continuity" -maxdepth 1 -type f | sort
+```
+
+Check provider health inside Hermes:
+
+```text
+continuity_status
+```
+
+If no memories are retrieved:
+
+```text
+continuity_search(query="expected memory")
+continuity_debug_retrieval(query="exact user wording")
+```
+
+See `docs/TROUBLESHOOTING.md` and `docs/TUNING.md` for more detail.

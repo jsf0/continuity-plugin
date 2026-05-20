@@ -191,9 +191,9 @@ def test_prune_stale_does_not_supersede_distinct_mirrors_with_generic_titles() -
             "scope_project": "root",
             "title": "Hermes global memory",
             "summary": (
-                "Hermes continuity memory provider in Joseph's live gateway is loaded "
-                "as a plugin from `~/.hermes/plugins/continuity/`; the separate repo "
-                "at `/root/hermes-continuity-memory` may not reflect the live plugin copy."
+                "Hermes continuity memory provider in a local test gateway is loaded "
+                "as a plugin from `$HERMES_HOME/plugins/continuity/`; the separate checkout "
+                "may not reflect the live plugin copy."
             ),
             "tags": ["built_in_memory", "memory_target:memory", "project_convention"],
             "entities": [],
@@ -219,7 +219,7 @@ def test_prune_stale_does_not_supersede_distinct_mirrors_with_generic_titles() -
                 "conservative, lower-trust than explicit memories, default dry-run/review, "
                 "generate retrieval evals, track source hashes for refresh/staleness, and "
                 "keep raw source chunks separate for verification. Draft spec saved at "
-                "/root/hermes-continuity-memory/docs/plans/2026-05-05-corpus-ingestion-spec.md."
+                "a private planning note outside the public repository."
             ),
             "tags": ["built_in_memory", "memory_target:memory", "project_convention"],
             "entities": [],

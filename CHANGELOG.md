@@ -5,7 +5,7 @@ All notable changes to Hermes Continuity Memory are documented here.
 This project uses pre-1.0 semantic versioning. Minor versions may change plugin
 behavior while the provider API is still stabilizing.
 
-## 0.1.0 — Unreleased
+## 0.1.0 — 2026-05-17
 
 ### Added
 

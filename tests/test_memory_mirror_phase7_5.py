@@ -29,15 +29,15 @@ def test_on_memory_write_adds_user_preference_record(tmp_path: Path, monkeypatch
     provider = initialized_provider(tmp_path, monkeypatch)
     assert provider._store is not None
 
-    provider.on_memory_write("add", "user", "Joseph prefers foundation-first sequencing.")
+    provider.on_memory_write("add", "user", "Avery prefers foundation-first sequencing.")
 
     records = provider._store.list_records()
     assert len(records) == 1
     record = records[0]
     assert record.id.startswith("mirror_user_")
     assert record.kind == "user_preference"
-    assert record.title == "Joseph prefers foundation-first sequencing"
-    assert record.summary == "Joseph prefers foundation-first sequencing."
+    assert record.title == "Avery prefers foundation-first sequencing"
+    assert record.summary == "Avery prefers foundation-first sequencing."
     assert record.trust_level == "built_in_memory_mirror"
     assert record.scope_project is None
     assert record.sources[0].type == "built_in_memory"

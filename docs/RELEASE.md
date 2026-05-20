@@ -67,12 +67,23 @@ Confirm these are current:
 - `README.md`
 - `CHANGELOG.md`
 - `docs/INSTALL.md`
+- `docs/ARCHITECTURE.md`
+- `docs/REPO_MAP.md`
 - `docs/CONFIGURATION.md`
+- `docs/TUNING.md`
+- `docs/DEMO.md`
+- `docs/OPERATIONS.md`
+- `docs/PRIVACY.md`
 - `docs/CORPUS_INGESTION.md`
 - `docs/TROUBLESHOOTING.md`
 - `docs/SPEC.md`
 - `CONTRIBUTING.md`
 - `SECURITY.md`
+
+Confirm helper scripts are documented and safe:
+
+- `scripts/install.sh`
+- `scripts/uninstall.sh`
 
 ## 7. Bump version if needed
 

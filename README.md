@@ -194,6 +194,8 @@ uv build
 
 The smoke test installs into a temporary `HERMES_HOME`, loads the provider, exercises add/search/prefetch/delete, verifies memory mirroring and skill-link output, builds a wheel when `uv` is available, and checks that `continuity/plugin.yaml` and `continuity/py.typed` are packaged.
 
+For orientation, start with [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) and [`docs/REPO_MAP.md`](docs/REPO_MAP.md).
+
 To try retrieval without using your real memory DB, run the public synthetic demo corpus:
 
 ```bash
@@ -236,8 +238,14 @@ This is not comprehensive DLP or an access-control system. See [`docs/TROUBLESHO
 
 ## Project docs
 
-- [`docs/INSTALL.md`](docs/INSTALL.md) — install and verification.
-- [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md) — runtime configuration.
+- [`docs/INSTALL.md`](docs/INSTALL.md) — install, verify, upgrade, rollback, and uninstall.
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — system design, data flow, storage, retrieval, and safety model.
+- [`docs/REPO_MAP.md`](docs/REPO_MAP.md) — where to find the main code, tests, scripts, and extension points.
+- [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md) — complete runtime configuration reference.
+- [`docs/TUNING.md`](docs/TUNING.md) — plain-English retrieval knobs, symptoms, and example recipes.
+- [`docs/DEMO.md`](docs/DEMO.md) — walkthrough for the synthetic public demo corpus and small-model context demo.
+- [`docs/OPERATIONS.md`](docs/OPERATIONS.md) — day-to-day status, search, debug, archive, backup, and maintenance workflows.
+- [`docs/PRIVACY.md`](docs/PRIVACY.md) — what is stored, where it lives, prompt exposure, deletion, and public-release hygiene.
 - [`docs/CORPUS_INGESTION.md`](docs/CORPUS_INGESTION.md) — review-first corpus ingestion, temporary validation, and scale/debug stats.
 - [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md) — common issues and debugging.
 - [`docs/SPEC.md`](docs/SPEC.md) — phased technical spec.
