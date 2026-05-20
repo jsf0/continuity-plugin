@@ -4,6 +4,14 @@ Scalable contextual recall for Hermes Agent — without stuffing every memory in
 
 Hermes Continuity Memory is a local-first structured memory provider for Hermes Agent. In the recommended production setup, it replaces Hermes' stock built-in memory as the primary memory provider: a tiny Tier 0 set of high-trust continuity records is pinned into the system prompt, while the long tail of project state, decisions, debugging lessons, environment facts, and preferences stays in SQLite and is retrieved only when relevant.
 
+## Rationale
+
+The stock Hermes memory system uses MEMORY.md for important memories, but tries to keep it small to avoid putting too much information into prompts. This works well for highly curated memories, but necessarily limits the amount that can be stored.
+
+Continuity Memory uses a SQLite database and a retrieval mechanism that is designed to only return the relevant memories for each conversation. This allows a much larger set of memories to be stored, and only relevant ones added to prompts, so that the model gets highly accurate, scoped memories relevant to the conversation or task.
+
+This retrieval mechanism models memories as nodes in an association graph, with stronger or weaker ties between individual memories, based on Collins and Loftus' 1975 paper ["A spreading-activation theory of semantic processing"](https://psycnet.apa.org/doiLanding?doi=10.1037%2F0033-295X.82.6.407) . This means Continuity is capable of fuzzy searches and returns multiple related memories even if there is no exact match.
+
 This is definitely alpha at this point, and is under active testing and development. It will have some rough edges.
 
 ## Highlights
