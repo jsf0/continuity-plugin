@@ -1336,21 +1336,43 @@ def _association_index_terms(record: ContextRecord) -> list[tuple[str, str, floa
                 target = str(reference.get("target") or "")
                 raw = str(reference.get("raw") or "")
                 section = str(reference.get("section") or "")
-                add(raw or target, "source_ref", 3.5)
+                reference_term = raw or target
+                add(reference_term, "source_ref", 3.5)
+                add(reference_term, "identity", 4.0)
                 if target and section:
-                    add(f"{target} {section}", "source_ref", 3.5)
+                    reference_section_term = f"{target} {section}"
+                    add(reference_section_term, "source_ref", 3.5)
+                    add(reference_section_term, "identity", 4.0)
         context = metadata.get("context")
         if isinstance(context, dict):
             labels = context.get("labels")
             if isinstance(labels, dict):
-                for value in labels.values():
-                    add(str(value or ""), "identity", 2.5)
+                context_values = {}
+                for key, value in labels.items():
+                    label = str(value or "")
+                    add(label, "identity", 2.5)
+                    context_values[normalize_phrase(str(key or ""))] = label
+                command = context_values.get("command")
+                manual_section = context_values.get("manual_section") or context_values.get(
+                    "manual section"
+                )
+                if command and manual_section:
+                    add(f"{command} {manual_section}", "identity", 3.0)
     quality_context = record.quality.get("context") if isinstance(record.quality, dict) else None
     if isinstance(quality_context, dict):
         labels = quality_context.get("labels")
         if isinstance(labels, dict):
-            for value in labels.values():
-                add(str(value or ""), "identity", 2.5)
+            context_values = {}
+            for key, value in labels.items():
+                label = str(value or "")
+                add(label, "identity", 2.5)
+                context_values[normalize_phrase(str(key or ""))] = label
+            command = context_values.get("command")
+            manual_section = context_values.get("manual_section") or context_values.get(
+                "manual section"
+            )
+            if command and manual_section:
+                add(f"{command} {manual_section}", "identity", 3.0)
     for tag in record.tags:
         add(tag, "tag", 2.0)
     for token in tokenize_text(

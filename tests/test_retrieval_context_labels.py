@@ -566,3 +566,56 @@ def test_association_graph_cuts_conflicting_context_neighbor(tmp_path: Path) -> 
         cut["record_id"] == "ifconfig_linux" and cut["reason"] == "context_label_conflict"
         for cut in debug["activation_trace"]["cut_neighbors"]
     )
+
+
+
+def test_upsert_auto_creates_source_reference_edges_for_identity_targets(tmp_path: Path) -> None:
+    store = ContinuityStore(tmp_path / "continuity.db")
+    store.migrate()
+    store.upsert_record(
+        make_manpage_record(
+            "openbsd_ldom_conf_5",
+            command="ldom.conf",
+            manual_section="5",
+            summary="Configuration file grammar.",
+        )
+    )
+    for index in range(5):
+        store.upsert_record(
+            make_manpage_record(
+                f"aaa_noise_{index}",
+                command=f"noise{index}",
+                summary=f"Unrelated daemon reference {index}.",
+            )
+        )
+
+    store.upsert_record(
+        make_manpage_record(
+            "openbsd_ldomctl_8",
+            command="ldomctl",
+            summary="Domain control utility.",
+            sources=[
+                SourceRef(
+                    type="corpus_segment",
+                    id="ldomctl-description",
+                    metadata={
+                        "outbound_references": [
+                            {
+                                "target_type": "manpage",
+                                "target": "ldom.conf",
+                                "section": "5",
+                                "raw": "ldom.conf(5)",
+                                "relation": "see-also",
+                            }
+                        ]
+                    },
+                )
+            ],
+        ),
+        candidate_limit=1,
+    )
+
+    edges = store.list_association_edges("openbsd_ldomctl_8")
+    assert [(edge.memory_id_b, edge.edge_type) for edge in edges] == [
+        ("openbsd_ldom_conf_5", "source_reference")
+    ]
