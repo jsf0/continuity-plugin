@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 from continuity import ContinuityProvider, register
+from continuity.models import ContextRecord
 
 
 class ProviderCollector:
@@ -92,3 +93,35 @@ def test_status_reports_retrieval_gate_config(tmp_path: Path) -> None:
     assert result["retrieval_gates"]["min_vector_relevance"] == 0.05
     assert result["retrieval_gates"]["low_information"] is False
     assert result["retrieval_gates"]["facet_compatibility"] is True
+
+
+class CapturingStore:
+    def __init__(self) -> None:
+        self.upsert_kwargs: dict[str, object] | None = None
+
+    def upsert_record(self, record: ContextRecord, **kwargs: object) -> None:
+        self.upsert_kwargs = kwargs
+
+
+def test_provider_upsert_disables_association_creation_when_graph_disabled(tmp_path: Path) -> None:
+    provider = ContinuityProvider()
+    provider.initialize(
+        session_id="session-association-disabled",
+        hermes_home=str(tmp_path),
+        continuity_config={"association_graph": {"enabled": False}},
+    )
+    store = CapturingStore()
+    provider._store = store  # type: ignore[assignment]
+
+    provider._upsert_record(
+        ContextRecord.new(
+            id="record-1",
+            kind="environment_fact",
+            title="Record one",
+            summary="A record that should not create associations when disabled.",
+        )
+    )
+
+    assert store.upsert_kwargs is not None
+    assert store.upsert_kwargs["create_associations"] is False
+

@@ -572,6 +572,7 @@ class ContinuityProvider(MemoryProvider):
             return
         self._store.upsert_record(
             record,
+            create_associations=self._config.association_graph.enabled,
             edge_creation_threshold=self._config.association_graph.edge_creation_threshold,
             out_degree_cap=self._config.association_graph.out_degree_cap,
         )
