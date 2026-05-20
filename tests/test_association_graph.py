@@ -904,3 +904,75 @@ def test_upsert_association_creation_scores_only_active_records(tmp_path, monkey
     )
 
     assert compared_ids == ["active"]
+
+
+
+def test_upsert_association_creation_scores_only_candidate_limit(tmp_path, monkeypatch):
+    store = ContinuityStore(tmp_path / "continuity.db")
+    store.migrate()
+    for index in range(20):
+        store.upsert_record(
+            _record(
+                f"candidate_{index:02d}",
+                f"Shared topic record {index}.",
+                tags=["shared-topic"],
+                entities=[f"candidate-{index}"],
+            ),
+            create_associations=False,
+        )
+    compared_ids = []
+    original = store_mod.association_strength
+
+    def counted_association_strength(left, right, *, stats=None):
+        compared_ids.append(right.id)
+        return original(left, right, stats=stats)
+
+    monkeypatch.setattr(store_mod, "association_strength", counted_association_strength)
+
+    store.upsert_record(
+        _record(
+            "new_limited",
+            "Shared topic new record.",
+            tags=["shared-topic"],
+            entities=["new-limited"],
+        ),
+        edge_creation_threshold=999,
+        candidate_limit=5,
+    )
+
+    assert len(compared_ids) == 5
+
+
+def test_upsert_association_candidate_lookup_preserves_relevant_edge_creation(tmp_path):
+    store = ContinuityStore(tmp_path / "continuity.db")
+    store.migrate()
+    store.upsert_record(
+        _record(
+            "relevant",
+            "OpenBSD deployment uses rcctl restart.",
+            tags=["openbsd", "deployment"],
+            entities=["OpenBSD", "rcctl"],
+        )
+    )
+    store.upsert_record(
+        _record(
+            "irrelevant",
+            "Sailboat towing notes mention a trailer.",
+            tags=["boat"],
+            entities=["Hobie 16"],
+        )
+    )
+
+    store.upsert_record(
+        _record(
+            "new_openbsd",
+            "OpenBSD rcctl service restart procedure.",
+            tags=["openbsd"],
+            entities=["OpenBSD", "rcctl"],
+        ),
+        candidate_limit=1,
+    )
+
+    assert [edge.memory_id_b for edge in store.list_association_edges("new_openbsd")] == [
+        "relevant"
+    ]

@@ -576,6 +576,7 @@ class ContinuityProvider(MemoryProvider):
             create_associations=self._config.association_graph.enabled,
             edge_creation_threshold=self._config.association_graph.edge_creation_threshold,
             out_degree_cap=self._config.association_graph.out_degree_cap,
+            candidate_limit=self._config.association_graph.candidate_limit,
         )
         if self._vector_backend:
             self._vector_backend.upsert(record.id, record.embedding_text or "")

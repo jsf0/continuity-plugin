@@ -454,8 +454,13 @@ class ContinuityStore:
         create_associations: bool = True,
         edge_creation_threshold: float = 0.25,
         out_degree_cap: int = 20,
+        candidate_limit: int = 250,
     ) -> None:
-        existing_records = self.list_active_records() if create_associations else []
+        existing_records = (
+            self.find_association_candidates(record, limit=candidate_limit)
+            if create_associations
+            else []
+        )
         with self.connect() as conn:
             conn.execute(
                 """
@@ -522,6 +527,43 @@ class ContinuityStore:
         with self.connect() as conn:
             rows = conn.execute(
                 "SELECT * FROM context_records WHERE status = 'active' ORDER BY id"
+            ).fetchall()
+        return [_record_from_row(row) for row in rows]
+
+    def find_association_candidates(
+        self, record: ContextRecord, *, limit: int = 250
+    ) -> list[ContextRecord]:
+        terms = _association_index_terms(record)
+        if not terms:
+            return []
+        bounded_limit = max(1, int(limit))
+        values_sql = ", ".join(["(?, ?, ?)"] * len(terms))
+        params: list[object] = []
+        for term, term_kind, weight in terms:
+            params.extend([term, term_kind, weight])
+        params.extend([record.id, bounded_limit])
+        with self.connect() as conn:
+            rows = conn.execute(
+                f"""
+                WITH input_terms(term, term_kind, input_weight) AS (
+                  VALUES {values_sql}
+                ), candidate_scores AS (
+                  SELECT t.record_id,
+                         SUM(t.weight * input_terms.input_weight) AS candidate_score,
+                         COUNT(*) AS overlap_count
+                  FROM context_record_association_terms t
+                  JOIN input_terms ON input_terms.term = t.term
+                  GROUP BY t.record_id
+                )
+                SELECT r.*
+                FROM candidate_scores c
+                JOIN context_records r ON r.id = c.record_id
+                WHERE r.status = 'active' AND r.id != ?
+                ORDER BY c.candidate_score DESC, c.overlap_count DESC,
+                         r.importance DESC, r.updated_at DESC, r.id
+                LIMIT ?
+                """,
+                params,
             ).fetchall()
         return [_record_from_row(row) for row in rows]
 
@@ -1282,6 +1324,33 @@ def _association_index_terms(record: ContextRecord) -> list[tuple[str, str, floa
 
     for entity in record.entities:
         add(entity, "entity", 3.0)
+        add(entity, "identity", 3.0)
+    add(record.title, "identity", 2.5)
+    for source in record.sources:
+        metadata = source.metadata or {}
+        references = metadata.get("outbound_references")
+        if isinstance(references, list):
+            for reference in references:
+                if not isinstance(reference, dict):
+                    continue
+                target = str(reference.get("target") or "")
+                raw = str(reference.get("raw") or "")
+                section = str(reference.get("section") or "")
+                add(raw or target, "source_ref", 3.5)
+                if target and section:
+                    add(f"{target} {section}", "source_ref", 3.5)
+        context = metadata.get("context")
+        if isinstance(context, dict):
+            labels = context.get("labels")
+            if isinstance(labels, dict):
+                for value in labels.values():
+                    add(str(value or ""), "identity", 2.5)
+    quality_context = record.quality.get("context") if isinstance(record.quality, dict) else None
+    if isinstance(quality_context, dict):
+        labels = quality_context.get("labels")
+        if isinstance(labels, dict):
+            for value in labels.values():
+                add(str(value or ""), "identity", 2.5)
     for tag in record.tags:
         add(tag, "tag", 2.0)
     for token in tokenize_text(
