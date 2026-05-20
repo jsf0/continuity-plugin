@@ -13,7 +13,9 @@ from .association import association_strength
 from .models import AssociationEdge, ContextRecord, SkillLink, SourceRef, utc_now
 from .security import sanitize_observation_text
 
-SCHEMA_VERSION = 7
+from .vocabulary import normalize_phrase, tokenize_text
+
+SCHEMA_VERSION = 8
 
 
 @dataclass(frozen=True)
@@ -141,6 +143,21 @@ class ContinuityStore:
                   CHECK(strength >= 0.0 AND strength <= 1.0)
                 );
 
+                CREATE TABLE IF NOT EXISTS context_record_association_terms (
+                  record_id TEXT NOT NULL,
+                  term TEXT NOT NULL,
+                  term_kind TEXT NOT NULL,
+                  weight REAL NOT NULL DEFAULT 1.0,
+                  PRIMARY KEY(record_id, term, term_kind),
+                  FOREIGN KEY(record_id) REFERENCES context_records(id) ON DELETE CASCADE
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_context_record_association_terms_lookup
+                  ON context_record_association_terms(term, term_kind, weight DESC, record_id);
+
+                CREATE INDEX IF NOT EXISTS idx_context_record_association_terms_record
+                  ON context_record_association_terms(record_id);
+
                 CREATE TABLE IF NOT EXISTS continuity_state (
                   key TEXT PRIMARY KEY,
                   value TEXT NOT NULL,
@@ -227,6 +244,10 @@ class ContinuityStore:
             conn.execute(
                 "INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)",
                 (6, utc_now()),
+            )
+            conn.execute(
+                "INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)",
+                (7, utc_now()),
             )
             conn.execute(
                 "INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)",
@@ -476,6 +497,7 @@ class ContinuityStore:
                 _record_row(record),
             )
             self._replace_fts_row(conn, record)
+            self._replace_association_terms(conn, record)
         if create_associations:
             self._create_candidate_association_edges(
                 record,
@@ -513,6 +535,10 @@ class ContinuityStore:
             conn.execute("DELETE FROM context_records WHERE id = ?", (record_id,))
             conn.execute("DELETE FROM context_records_fts WHERE id = ?", (record_id,))
             conn.execute("DELETE FROM context_record_vectors WHERE record_id = ?", (record_id,))
+            conn.execute(
+                "DELETE FROM context_record_association_terms WHERE record_id = ?",
+                (record_id,),
+            )
             conn.execute(
                 "DELETE FROM context_record_skill_links WHERE record_id = ?",
                 (record_id,),
@@ -1036,6 +1062,23 @@ class ContinuityStore:
             ),
         )
 
+    def _replace_association_terms(
+        self, conn: sqlite3.Connection, record: ContextRecord
+    ) -> None:
+        conn.execute(
+            "DELETE FROM context_record_association_terms WHERE record_id = ?", (record.id,)
+        )
+        for term, term_kind, weight in _association_index_terms(record):
+            conn.execute(
+                """
+                INSERT INTO context_record_association_terms(record_id, term, term_kind, weight)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(record_id, term, term_kind) DO UPDATE SET
+                  weight=excluded.weight
+                """,
+                (record.id, term, term_kind, weight),
+            )
+
 
 def _model_dict(value: object) -> dict[str, object]:
     if hasattr(value, "to_dict"):
@@ -1225,6 +1268,27 @@ def _index_text(values: list[str]) -> str:
         expanded.append(re.sub(r"[^\w]+", " ", value))
         expanded.append(value.replace("_", " ").replace("-", " ").replace(":", " "))
     return " ".join(expanded)
+
+
+def _association_index_terms(record: ContextRecord) -> list[tuple[str, str, float]]:
+    terms: dict[tuple[str, str], float] = {}
+
+    def add(term: str, term_kind: str, weight: float) -> None:
+        normalized = normalize_phrase(term)
+        if not normalized or len(normalized) <= 2:
+            return
+        key = (normalized, term_kind)
+        terms[key] = max(weight, terms.get(key, 0.0))
+
+    for entity in record.entities:
+        add(entity, "entity", 3.0)
+    for tag in record.tags:
+        add(tag, "tag", 2.0)
+    for token in tokenize_text(
+        " ".join([record.title, record.summary, record.details or "", *record.tags, *record.entities])
+    ):
+        add(token, "text", 1.0)
+    return [(term, term_kind, weight) for (term, term_kind), weight in sorted(terms.items())]
 
 
 def _fts_query(query: str) -> str:

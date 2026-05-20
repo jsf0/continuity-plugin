@@ -485,6 +485,7 @@ class ContinuityProvider(MemoryProvider):
                 self._config.association_graph.edge_creation_threshold
             ),
             "association_out_degree_cap": self._config.association_graph.out_degree_cap,
+            "association_candidate_limit": self._config.association_graph.candidate_limit,
             "association_hop_decay": self._config.association_graph.hop_decay,
             "association_activation_threshold": (
                 self._config.association_graph.activation_threshold

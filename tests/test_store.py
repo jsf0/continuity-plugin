@@ -29,7 +29,7 @@ def test_store_migrates_idempotently(tmp_path: Path) -> None:
     store.migrate()
 
     assert db_path.exists()
-    assert store.schema_versions() == [1, 2, 3, 4, 6, 7]
+    assert store.schema_versions() == [1, 2, 3, 4, 6, 7, 8]
 
 
 def test_upsert_get_list_and_delete_record(tmp_path: Path) -> None:
@@ -113,3 +113,26 @@ def test_list_quality_inventory_reports_sparse_records(tmp_path: Path) -> None:
 
     assert inventory[0]["id"] == "r_sparse"
     assert "sparse_metadata" in inventory[0]["warnings"]
+
+
+
+def test_upsert_indexes_association_candidate_terms(tmp_path: Path) -> None:
+    store = ContinuityStore(tmp_path / "continuity.db")
+    store.migrate()
+    store.upsert_record(make_record())
+
+    with store.connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT term, term_kind FROM context_record_association_terms
+            WHERE record_id = ?
+            ORDER BY term_kind, term
+            """,
+            ("r1",),
+        ).fetchall()
+
+    indexed = {(str(row["term"]), str(row["term_kind"])) for row in rows}
+    assert ("delegate task", "tag") in indexed
+    assert ("timeout", "tag") in indexed
+    assert ("api calls 0", "entity") in indexed
+    assert ("delegate", "text") in indexed

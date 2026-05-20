@@ -31,6 +31,7 @@ class AssociationGraphConfig:
     enabled: bool = True
     edge_creation_threshold: float = 0.25
     out_degree_cap: int = 20
+    candidate_limit: int = 250
     hop_decay: float = 0.6
     activation_threshold: float = 0.3
     max_hops: int = 2
@@ -187,6 +188,7 @@ class ContinuityConfig:
                     max(0.0, _float(association.get("edge_creation_threshold"), 0.25)),
                 ),
                 out_degree_cap=max(1, _int(association.get("out_degree_cap"), 20)),
+                candidate_limit=max(1, _int(association.get("candidate_limit"), 250)),
                 hop_decay=min(1.0, max(0.0, _float(association.get("hop_decay"), 0.6))),
                 activation_threshold=min(
                     1.0,
