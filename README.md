@@ -4,9 +4,6 @@ Scalable contextual recall for Hermes Agent — without stuffing every memory in
 
 Hermes Continuity Memory is a local-first structured memory provider for Hermes Agent. In the recommended production setup, it replaces Hermes' stock built-in memory as the primary memory provider: a tiny Tier 0 set of high-trust continuity records is pinned into the system prompt, while the long tail of project state, decisions, debugging lessons, environment facts, and preferences stays in SQLite and is retrieved only when relevant.
 
-```text
-Recall small. Verify deep. Act from skills.
-```
 
 ## Highlights
 
@@ -70,6 +67,10 @@ Session search remains the raw archive for conversations that were not distilled
   - `Decision: ...`
 - Built-in Hermes memory migration/mirroring via `on_memory_write()` with semantic titles.
 - Pinned system-prompt Tier 0 records, enabled by default, plus always-on compact provider guidance.
+
+## Requirements
+
+Since continuity uses a small embeddings model, I recommend running hermes-agent on a machine with at least 8GB RAM and 8 cores. This will speed up retrievals.
 
 ## Install
 
