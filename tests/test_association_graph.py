@@ -6,6 +6,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from continuity.models import ContextRecord
 from continuity.reranking import RerankHit
 from continuity.retrieval import ContinuityRetriever
+import continuity.store as store_mod
 from continuity.store import ContinuityStore
 
 
@@ -862,3 +863,44 @@ def test_non_memory_query_does_not_match_continuity_eval_record_that_quotes_it(t
     assert debug["selected"] == []
     rejected = {candidate.record.id: candidate for candidate in debug["rejected"]}
     assert rejected["continuity_eval"].rejected_reason == "memory_system_record_without_meta_query"
+
+
+
+def test_upsert_association_creation_scores_only_active_records(tmp_path, monkeypatch):
+    store = ContinuityStore(tmp_path / "continuity.db")
+    store.migrate()
+    active = _record(
+        "active",
+        "OpenBSD active record uses rcctl.",
+        tags=["openbsd"],
+        entities=["OpenBSD"],
+    )
+    archived = _record(
+        "archived",
+        "OpenBSD archived record uses rcctl.",
+        tags=["openbsd"],
+        entities=["OpenBSD"],
+    )
+    store.upsert_record(active)
+    store.upsert_record(archived)
+    store.archive_record("archived", reason="not active")
+    compared_ids = []
+    original = store_mod.association_strength
+
+    def counted_association_strength(left, right, *, stats=None):
+        compared_ids.append(right.id)
+        return original(left, right, stats=stats)
+
+    monkeypatch.setattr(store_mod, "association_strength", counted_association_strength)
+
+    store.upsert_record(
+        _record(
+            "new",
+            "OpenBSD new record uses rcctl.",
+            tags=["openbsd"],
+            entities=["OpenBSD"],
+        ),
+        edge_creation_threshold=999,
+    )
+
+    assert compared_ids == ["active"]

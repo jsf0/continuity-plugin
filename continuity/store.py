@@ -434,7 +434,7 @@ class ContinuityStore:
         edge_creation_threshold: float = 0.25,
         out_degree_cap: int = 20,
     ) -> None:
-        existing_records = self.list_records() if create_associations else []
+        existing_records = self.list_active_records() if create_associations else []
         with self.connect() as conn:
             conn.execute(
                 """
@@ -494,6 +494,13 @@ class ContinuityStore:
     def list_records(self) -> list[ContextRecord]:
         with self.connect() as conn:
             rows = conn.execute("SELECT * FROM context_records ORDER BY id").fetchall()
+        return [_record_from_row(row) for row in rows]
+
+    def list_active_records(self) -> list[ContextRecord]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM context_records WHERE status = 'active' ORDER BY id"
+            ).fetchall()
         return [_record_from_row(row) for row in rows]
 
     def count_records(self) -> int:
