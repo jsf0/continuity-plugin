@@ -7,13 +7,20 @@ This guide installs the continuity memory provider into a local Hermes Agent hom
 - Hermes Agent installed locally.
 - Python 3.11+.
 - `bash` for helper scripts.
-- `uv` for development, tests, and package builds.
 
-The plugin runtime uses only the Python standard library by default. Optional neural embeddings/reranking require extra packages.
+The plugin runtime uses only the Python standard library by default. `uv` is useful for development, tests, and package builds, but it is not required for a normal install. Optional neural embeddings/reranking require extra packages.
 
 ## Quick install
 
-From a checkout of this repository:
+From a fresh clone:
+
+```bash
+git clone https://github.com/jsf0/continuity-plugin.git
+cd continuity-plugin
+./scripts/install.sh
+```
+
+From an existing checkout of this repository:
 
 ```bash
 ./scripts/install.sh

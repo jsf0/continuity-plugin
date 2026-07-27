@@ -79,14 +79,32 @@ Session search remains the raw archive for conversations that were not distilled
 
 ## Requirements
 
-Since continuity uses a small embeddings model, I recommend running hermes-agent on a machine with at least 8GB RAM and 8 cores. This will speed up retrievals.
+- Hermes Agent installed locally.
+- Python 3.11+.
+- `bash` for the install/uninstall helper scripts.
+
+The default runtime path is dependency-free: SQLite/FTS, hashed vectors, association graph retrieval, and all Hermes tools use only the Python standard library. `uv`, `pytest`, `ruff`, `sentence-transformers`, and `torch` are needed only for development checks or optional neural embeddings/reranking.
 
 ## Install
 
+The public repository is `jsf0/continuity-plugin`:
+
 ```bash
-git clone <repo-url>
-cd hermes-continuity-memory
+git clone https://github.com/jsf0/continuity-plugin.git
+cd continuity-plugin
 ./scripts/install.sh
+```
+
+To install into a non-default Hermes home:
+
+```bash
+HERMES_HOME=/path/to/hermes-home ./scripts/install.sh
+```
+
+To preview without writing files:
+
+```bash
+./scripts/install.sh --dry-run
 ```
 
 The installer copies the plugin package to:
@@ -95,7 +113,24 @@ The installer copies the plugin package to:
 ${HERMES_HOME:-$HOME/.hermes}/plugins/continuity/
 ```
 
-Add the provider to your main Hermes config, usually `~/.hermes/config.yaml`:
+It deliberately does **not** edit your Hermes config and does **not** delete or migrate any memory database. Runtime data is stored separately at:
+
+```text
+${HERMES_HOME:-$HOME/.hermes}/continuity/continuity.db
+```
+
+## Enable the provider
+
+Edit your main Hermes config, usually `~/.hermes/config.yaml`, and start with the minimal config:
+
+```yaml
+memory:
+  provider: continuity
+```
+
+That is enough for a first install. The built-in defaults enable conservative retrieval, provider guidance, association-graph search, and a tiny Tier 0 pinned-memory prompt. Optional vector retrieval is **off** unless you enable it.
+
+Recommended dependency-free config if you want local hashed vectors enabled immediately:
 
 ```yaml
 memory:
@@ -105,75 +140,62 @@ memory:
     max_chars: 1800
     min_score: 0.1
     include_sources: true
-    include_scores: true
-
-    # Dependency-free local vectors. Good default for first install.
+    include_scores: false
     vector:
       enabled: true
       backend: sqlite-hash
-
-    # Optional: enable only after installing sentence-transformers deps.
     reranker:
       enabled: false
       backend: none
-
     association_graph:
       enabled: true
-
-    # Optional precision/recall gates. Defaults are conservative; see
-    # docs/CONFIGURATION.md#retrieval-gate-tuning before changing.
-    retrieval_gates:
-      min_base_relevance: 0.35
-      min_vector_relevance: 0.05
-      min_vector_only_relevance: 2.75
-      weak_vector_only: true
-      facet_compatibility: true
-      memory_meta: true
-      low_information: true
-      project_status_anchor: true
-      personal_project: true
-      activation_anchor: true
-      strong_personal_anchor_reranker_bypass: true
-
-    # Continuity guidance plus optional Tier 0 records.
-    # Set include_records: false for guidance-only mode with no memory summaries.
     pinned_system_prompt:
       enabled: true
       include_records: true
       max_chars: 1200
-      max_records: 6
-
-    # Optional maintenance cycle. Manual `continuity_dream` works regardless;
-    # scheduled checks run only when Hermes initializes or processes turns.
-    dream:
-      enabled: false
-      schedule: "03:30"
-      timezone: "UTC"
-      mode: report
+      max_records: 5
+      kinds: [user_preference, project_convention]
+      min_importance: 0.75
 ```
 
-`install.sh` deliberately does **not** edit your Hermes config. After adding the config, restart Hermes or start a new session.
+After updating config, restart Hermes or start a new session. Then ask Hermes to run:
 
-See [`docs/INSTALL.md`](docs/INSTALL.md) for detailed install and verification steps.
-
-## Configuration quick start
-
-Minimal:
-
-```yaml
-memory:
-  provider: continuity
+```text
+continuity_status
 ```
 
-Example with local neural embeddings and reranking:
+A healthy install reports `provider: continuity`, `initialized: true`, a `db_path` under your Hermes home, and the available continuity tools.
+
+## Quick verification from a checkout
+
+Before changing your real Hermes config, you can run the isolated smoke test:
+
+```bash
+./scripts/smoke-test.sh
+```
+
+Expected final line:
+
+```text
+smoke test ok
+```
+
+The smoke test creates a temporary `HERMES_HOME`, installs the plugin there, loads the provider, exercises add/search/prefetch/delete, verifies memory mirroring and skill-link output, and checks packaging metadata. It does not read or modify your real `~/.hermes/continuity/continuity.db`.
+
+## Optional neural embeddings and reranking
+
+Use the dependency-free install first unless you specifically need neural retrieval. To experiment with local `sentence-transformers` vectors/reranking in a development checkout:
+
+```bash
+uv sync --extra embeddings --dev
+```
+
+Then configure:
 
 ```yaml
 memory:
   provider: continuity
   continuity:
-    max_records: 5
-    max_chars: 1800
-    min_score: 0.1
     vector:
       enabled: true
       backend: sentence-transformers
@@ -183,13 +205,9 @@ memory:
       backend: sentence-transformers
       model: BAAI/bge-reranker-base
       min_score: 0.15
-    association_graph:
-      enabled: true
-    pinned_system_prompt:
-      enabled: true
 ```
 
-See [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md) for all options.
+See [`docs/INSTALL.md`](docs/INSTALL.md) for detailed install, upgrade, rollback, uninstall, and troubleshooting steps. See [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md) for all configuration options.
 
 ## Development
 
