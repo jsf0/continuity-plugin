@@ -5,6 +5,18 @@ All notable changes to Hermes Continuity Memory are documented here.
 This project uses pre-1.0 semantic versioning. Minor versions may change plugin
 behavior while the provider API is still stabilizing.
 
+## 0.1.5 — 2026-11-05
+
+### Changed
+
+- README now recommends `mixedbread-ai/mxbai-rerank-base-v2` as the
+  optional reranker model, based on a labeled-pair evaluation on a real
+  150-record continuity corpus: 25/25 correct with a wide margin at the
+  default 0.15 threshold, versus `bge-reranker-base` (24/25, misses terse
+  metadata records) and `bge-reranker-v2-m3` (25/25 but compressed
+  calibration requiring min_score ~0.01). No code change; the model is a
+  configuration value.
+
 ## 0.1.4 — 2026-11-05
 
 ### Added

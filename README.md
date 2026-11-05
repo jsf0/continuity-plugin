@@ -218,9 +218,18 @@ memory:
     reranker:
       enabled: true
       backend: sentence-transformers
-      model: BAAI/bge-reranker-base
+      model: mixedbread-ai/mxbai-rerank-base-v2
       min_score: 0.15
 ```
+
+> **Reranker model note.** An evaluation on a real 150-record continuity
+> corpus (Nov 2026) found `mixedbread-ai/mxbai-rerank-base-v2` clearly the
+> best `sentence-transformers`-compatible choice: it classified all 25
+> labeled relevant/noise pairs correctly with a wide score margin (all
+> relevant records >= 0.86, all noise <= 0.06 at the default 0.15
+> threshold), where `BAAI/bge-reranker-base` missed terse metadata-style
+> records entirely and `bge-reranker-v2-m3` required recalibrating
+> `min_score` down to ~0.01. Always re-measure on your own corpus.
 
 See [`docs/INSTALL.md`](docs/INSTALL.md) for detailed install, upgrade, rollback, uninstall, and troubleshooting steps. See [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md) for all configuration options.
 
