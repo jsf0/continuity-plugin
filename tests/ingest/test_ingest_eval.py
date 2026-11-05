@@ -109,7 +109,23 @@ def test_eval_runner_runs_jsonl_file_and_writes_report(tmp_path) -> None:
 
 def test_eval_runner_fails_when_expected_title_is_not_in_required_top_k(tmp_path) -> None:
     store = ContinuityStore(tmp_path / "continuity.db")
-    noisy = _candidate(candidate_id="cand_noisy", tags=["corpus-ingestion"])
+    # A competitor that legitimately matches the query better than the
+    # expected record, so it takes the single top-k slot.
+    noisy = CandidateRecord(
+        candidate_id="cand_noisy",
+        kind="artifact_summary",
+        title="Eval fixture overview",
+        summary=(
+            "Eval fixture overview. The eval fixture policy summary covers "
+            "eval fixture behavior and eval fixture storage in detail."
+        ),
+        scope_project="eval-fixture",
+        tags=["corpus-ingestion"],
+        entities=["Eval Fixture"],
+        confidence=0.9,
+        importance=0.95,
+        source_refs=[SourceRef(type="file", uri="file://overview.md")],
+    )
     expected = CandidateRecord(
         candidate_id="cand_expected",
         kind="artifact_summary",

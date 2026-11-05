@@ -471,7 +471,7 @@ class ContinuityRetriever:
                 if not include_stale and _is_inactive_or_expired(hit.record):
                     continue
                 candidate = candidates.setdefault(hit.record.id, CandidateScore(hit.record))
-                candidate.fts_score += max(0.0, 1.0 / (1.0 + abs(hit.rank))) * FTS_WEIGHT
+                candidate.fts_score += _fts_rank_score(hit.rank) * FTS_WEIGHT
                 if "fts" not in candidate.reasons:
                     candidate.reasons.append("fts")
 
@@ -532,7 +532,7 @@ class ContinuityRetriever:
                     if not include_stale and _is_inactive_or_expired(hit.record):
                         continue
                     candidate = candidates.setdefault(hit.record.id, CandidateScore(hit.record))
-                    candidate.fts_score += max(0.0, 1.0 / (1.0 + abs(hit.rank))) * FTS_WEIGHT
+                    candidate.fts_score += _fts_rank_score(hit.rank) * FTS_WEIGHT
                     if "fts" not in candidate.reasons:
                         candidate.reasons.append("fts")
             for record in self.store.list_records():
@@ -1570,6 +1570,21 @@ def _is_weak_vector_only_candidate(
         )
     )
     return not has_anchor and 0 < candidate.vector_score < gate_config.min_vector_only_relevance
+
+
+def _fts_rank_score(rank: float) -> float:
+    """Convert an SQLite bm25 rank into a bounded (0, 1) relevance score.
+
+    SQLite's bm25() returns negative values where MORE negative is a BETTER
+    match (rows are ordered ascending).  The previous conversion took
+    abs(rank), which inverted the ordering: the best FTS match received the
+    LEAST credit (observed live: the top bm25 hit for "oil" scored 0.20
+    while a filler-token match scored 0.42).  Normalize the magnitude
+    monotonically instead: a better (more negative) rank always scores
+    higher, with values bounded in (0, 1).
+    """
+    magnitude = max(0.0, -float(rank))
+    return magnitude / (magnitude + 1.0)
 
 
 def _apply_scope_score(

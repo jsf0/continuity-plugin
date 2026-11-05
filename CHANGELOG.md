@@ -5,6 +5,20 @@ All notable changes to Hermes Continuity Memory are documented here.
 This project uses pre-1.0 semantic versioning. Minor versions may change plugin
 behavior while the provider API is still stabilizing.
 
+## 0.1.3 — 2026-11-05
+
+### Fixed
+
+- FTS bm25 rank-to-score conversion was inverted: SQLite's `bm25()` returns
+  negative ranks where more negative is a BETTER match, but the pipeline
+  converted with `abs(rank)` and `1/(1+abs)`, so the best FTS match received
+  the least credit (observed: top bm25 hit for "oil" scored 0.20 while a
+  filler-token match scored 0.42). Ranks now convert monotonically
+  (`magnitude/(magnitude+1)`), bounded in (0, 1). Several test assertions
+  that encoded the inverted ordering (exact seed orderings, a calibrated
+  eval top-k miss, and one mirror-suppression reason label) were updated to
+  test their underlying intent instead.
+
 ## 0.1.2 — 2026-11-05
 
 ### Added

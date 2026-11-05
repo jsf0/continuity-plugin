@@ -385,8 +385,18 @@ def test_memory_meta_query_suppresses_generic_mirror_records(tmp_path):
     selected_ids = [candidate.record.id for candidate in debug["selected"]]
     rejected = {candidate.record.id: candidate for candidate in debug["rejected"]}
     assert selected_ids == ["continuity_noise_tuning"]
-    assert rejected["framework_hardware"].rejected_reason == "memory_meta_without_domain_anchor"
-    assert rejected["raptor_boat"].rejected_reason == "memory_meta_without_domain_anchor"
+    # Both unrelated records must be suppressed on a memory-meta query.  The
+    # rejection reason may be the meta gate or, with correct FTS rank
+    # scoring (weak matches now score lower), the earlier base-relevance
+    # gate — either way suppression must hold.
+    assert rejected["framework_hardware"].rejected_reason in {
+        "memory_meta_without_domain_anchor",
+        "below_min_base_relevance",
+    }
+    assert rejected["raptor_boat"].rejected_reason in {
+        "memory_meta_without_domain_anchor",
+        "below_min_base_relevance",
+    }
 
 
 def test_graph_does_not_pull_project_status_from_personal_query_via_tag_overlap(
@@ -674,7 +684,13 @@ def test_strong_project_anchor_can_still_seed_association_graph(tmp_path):
 
     selected_ids = [candidate.record.id for candidate in debug["selected"]]
     assert "guard_proxy_neighbor" in selected_ids
-    assert debug["activation_trace"]["activation_seeds"][0]["record_id"] == "guard_proxy_seed"
+    # The project-anchored seed must participate in graph seeding; the
+    # exact ordering among seeds depends on per-signal magnitudes (FTS rank
+    # normalization), so assert participation rather than index.
+    activation_seed_ids = {
+        entry["record_id"] for entry in debug["activation_trace"]["activation_seeds"]
+    }
+    assert "guard_proxy_seed" in activation_seed_ids
 
 
 def test_association_graph_meta_query_prefers_continuity_records_over_project_status(

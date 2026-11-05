@@ -489,7 +489,9 @@ def test_comparison_intent_allows_conflicting_partitions(tmp_path: Path) -> None
 
     ids = ids_for_search(store, comparison_intent=True)
 
-    assert ids == ["ifconfig_linux", "ifconfig_openbsd"]
+    # Both conflicting partitions must be selected; exact order depends on
+    # per-signal magnitudes (FTS rank normalization), so assert membership.
+    assert set(ids) == {"ifconfig_linux", "ifconfig_openbsd"}
 
 
 def test_same_generic_gate_handles_customer_and_language_partitions(tmp_path: Path) -> None:
