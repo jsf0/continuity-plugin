@@ -1,4 +1,10 @@
 name: continuity
 description: Local-first structured continuity memory with scoped retrieval for Hermes Agent.
-version: 0.1.0
+version: 0.1.2
+# Vector + reranker backends configured in config.yaml (memory.continuity.*)
+# import sentence_transformers inside the gateway process; the pm package
+# manager unions this into the shared dependency environment from enabled
+# plugins (pm/plugin_declarations.py).
+python_dependencies:
+  - "sentence-transformers>=3.0,<6"
 provider: memory

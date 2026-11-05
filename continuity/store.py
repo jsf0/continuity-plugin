@@ -837,6 +837,42 @@ class ContinuityStore:
                         edge_type=str(row["edge_type"]),
                     )
 
+    def rebuild_association_edges(
+        self,
+        *,
+        edge_creation_threshold: float = 0.25,
+        out_degree_cap: int = 20,
+        candidate_limit: int = 250,
+    ) -> dict[str, int]:
+        """Drop and recreate all association edges with the current formula.
+
+        Needed after changing edge-scoring rules: existing edges in the
+        database were created by the previous formula (and may have been
+        inflated by co-retrieval reinforcement), so a rules change is not
+        effective until edges are rebuilt.  Idempotent: records are simply
+        re-upserted, which recreates their edges under current rules.
+        """
+        with self.connect() as conn:
+            conn.execute("DELETE FROM context_record_association_edges")
+        records = [
+            record
+            for record in self.list_records()
+            if record.status == "active" and _record_allows_association_edges(record)
+        ]
+        for record in records:
+            self.upsert_record(
+                record,
+                create_associations=True,
+                edge_creation_threshold=edge_creation_threshold,
+                out_degree_cap=out_degree_cap,
+                candidate_limit=candidate_limit,
+            )
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) AS count FROM context_record_association_edges"
+            ).fetchone()
+        return {"records": len(records), "edges": int(row["count"])}
+
     def _create_candidate_association_edges(
         self,
         record: ContextRecord,
@@ -847,7 +883,10 @@ class ContinuityStore:
     ) -> None:
         from .vocabulary import CorpusTermStats
 
-        stats = CorpusTermStats.from_records([record, *existing_records])
+        # Corpus-global statistics, not candidate-local: IDF must reflect how
+        # rare a term is across the whole store, otherwise candidate-pool
+        # bias distorts which overlaps count as association evidence.
+        stats = CorpusTermStats.from_records(self.list_records())
         for other in existing_records:
             if other.id == record.id:
                 continue

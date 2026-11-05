@@ -72,10 +72,20 @@ def association_evidence(
     shared_tags = tuple(sorted(left_tags & right_tags))
     shared_terms = tuple(sorted((left_text & right_text) - set(shared_entities) - set(shared_tags)))
 
+    # Anchor bonuses must be earned by distinctive shared terms.  A flat
+    # +0.35 for ANY entity overlap let records connected only through
+    # generic tokens ("nov", "uv", "2026") cross the edge-creation
+    # threshold and turn dense, entity-rich records into graph hubs that
+    # activated on every query.  Scale each bonus by the share of IDF
+    # mass carried by non-generic shared terms, so a generic-only
+    # overlap earns nothing.
+    entity_anchor_quality = _anchor_quality(set(shared_entities), stats)
+    tag_anchor_quality = _anchor_quality(set(shared_tags), stats)
+
     strength = min(
         1.0,
-        (0.35 if entity_overlap > 0 else 0.0)
-        + (0.15 if tag_overlap > 0 else 0.0)
+        0.35 * entity_anchor_quality
+        + 0.15 * tag_anchor_quality
         + entity_overlap * 0.6
         + tag_overlap * 0.55
         + text_overlap * 0.3,
@@ -114,6 +124,27 @@ def association_strength(
 ) -> tuple[float, str]:
     evidence = association_evidence(left, right, stats=stats)
     return evidence.strength, evidence.edge_type
+
+
+def _anchor_quality(shared: set[str], stats: CorpusTermStats | None) -> float:
+    """Return the fraction of shared-term IDF mass that is non-generic.
+
+    1.0 when every shared term is distinctive (or when no corpus statistics
+    are available); approaches 0.0 when the overlap is carried entirely by
+    terms that appear in a large share of records and therefore carry no
+    association evidence.  Uses a stricter document fraction than the
+    default: a term appearing in more than 20% of records does not earn
+    anchor-bonus credit for an edge.
+    """
+    if not shared:
+        return 0.0
+    if stats is None:
+        return 1.0
+    total = sum(stats.idf(term) for term in shared)
+    distinctive = sum(
+        stats.idf(term) for term in shared if not stats.is_generic(term, max_document_fraction=0.2)
+    )
+    return distinctive / total if total > 0 else 0.0
 
 
 def _value_tokens(values: list[str]) -> set[str]:

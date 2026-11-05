@@ -247,6 +247,16 @@ CONTINUITY_REINDEX_VECTORS_SCHEMA: dict[str, object] = {
     },
 }
 
+CONTINUITY_REBUILD_ASSOCIATIONS_SCHEMA: dict[str, object] = {
+    "name": "continuity_rebuild_associations",
+    "description": "Drop and recreate all association graph edges under the current scoring rules. Use after changing edge scoring or to clear reinforced/noisy edges.",
+    "parameters": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+    },
+}
+
 CONTINUITY_DREAM_SCHEMA: dict[str, object] = {
     "name": "continuity_dream",
     "description": "Run an offline continuity memory dream cycle: report stale candidates or safely archive them.",
@@ -313,6 +323,7 @@ ALL_TOOL_SCHEMAS = [
     CONTINUITY_DEBUG_RETRIEVAL_SCHEMA,
     CONTINUITY_ASSOCIATION_EDGES_SCHEMA,
     CONTINUITY_REINDEX_VECTORS_SCHEMA,
+    CONTINUITY_REBUILD_ASSOCIATIONS_SCHEMA,
     CONTINUITY_DREAM_SCHEMA,
     CONTINUITY_QUALITY_REPORT_SCHEMA,
 ]
@@ -612,6 +623,19 @@ def handle_association_edges(store: ContinuityStore, args: dict[str, Any]) -> di
         "record_id": record_id,
         "edges": store.list_association_edge_inventory(record_id=record_id, limit=limit),
     }
+
+
+def handle_rebuild_associations(
+    store: ContinuityStore,
+    *,
+    edge_creation_threshold: float = 0.25,
+    out_degree_cap: int = 20,
+) -> dict[str, object]:
+    result = store.rebuild_association_edges(
+        edge_creation_threshold=edge_creation_threshold,
+        out_degree_cap=out_degree_cap,
+    )
+    return {"success": True, **result}
 
 
 def handle_reindex_vectors(

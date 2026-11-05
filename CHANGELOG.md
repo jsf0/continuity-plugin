@@ -5,6 +5,51 @@ All notable changes to Hermes Continuity Memory are documented here.
 This project uses pre-1.0 semantic versioning. Minor versions may change plugin
 behavior while the provider API is still stabilizing.
 
+## 0.1.2 — 2026-11-05
+
+### Added
+
+- `continuity_rebuild_associations` tool: drop and recreate all association
+  graph edges under current scoring rules (needed after scoring changes and
+  to clear co-retrieval-reinforced stale edges).
+- Ownership-query vector rescue: first-person questions with ownership verbs
+  ("what car do I drive?") relax the weak-vector-only gate to half threshold
+  for personal-kind records.
+- Regression tests for ownership rescue, the "handle" preference-token bug,
+  generic-verb expansion anchors, and IDF-anchored association edges.
+
+### Fixed
+
+- Association edges: anchor bonuses no longer granted flat for ANY entity
+  overlap. Bonuses scale with the share of IDF mass carried by non-generic
+  shared terms (a term in >20% of records earns no anchor credit), and IDF
+  is computed over the whole corpus instead of the candidate pool. This
+  removes graph hubs that activated on unrelated queries.
+- "handle" removed from preference-intent tokens: procedural questions
+  ("how do we handle firmware updates…") were being tagged as personal
+  preference queries, rejecting their own project records as
+  facet-incompatible.
+- Dynamic expansion no longer harvests terms from candidates anchored only
+  on generic verbs ("use", "get", "need", …).
+- README/INSTALL/install.sh now document the required
+  `hermes plugins enable continuity` step (provider setting and plugin
+  enable are independent switches).
+- `scripts/smoke-test.sh` falls back to the in-repo provider when the real
+  Hermes loader's dependencies are absent from the checkout venv.
+- `plugin.yaml` in the repository now carries the
+  `python_dependencies` declaration (sentence-transformers) that the
+  production install already required; version bumped to match.
+- Repository-wide ruff format/lint drift fixed; documented development
+  commands pass from a fresh clone.
+
+## 0.1.1 — 2026-11-04
+
+### Fixed
+
+- Embedding backend breakage after Hermes updates: `plugin.yaml` now declares
+  `python_dependencies` so the package manager installs sentence-transformers
+  into the shared plugin environment.
+
 ## 0.1.0 — 2026-05-17
 
 ### Added

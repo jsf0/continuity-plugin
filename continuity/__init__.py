@@ -34,6 +34,7 @@ from .tools import (
     handle_hydrate,
     handle_prune_stale,
     handle_quality_report,
+    handle_rebuild_associations,
     handle_recent_retrievals,
     handle_reindex_vectors,
     handle_restore,
@@ -316,6 +317,7 @@ class ContinuityProvider(MemoryProvider):
                 "continuity_debug_retrieval",
                 "continuity_recent_retrievals",
                 "continuity_association_edges",
+                "continuity_rebuild_associations",
                 "continuity_reindex_vectors",
                 "continuity_dream",
                 "continuity_quality_report",
@@ -376,6 +378,17 @@ class ContinuityProvider(MemoryProvider):
             )
         if tool_name == "continuity_association_edges" and self._store is not None:
             return json.dumps(handle_association_edges(self._store, args), ensure_ascii=False)
+        if tool_name == "continuity_rebuild_associations" and self._store is not None:
+            return json.dumps(
+                handle_rebuild_associations(
+                    self._store,
+                    edge_creation_threshold=(
+                        self._config.association_graph.edge_creation_threshold
+                    ),
+                    out_degree_cap=self._config.association_graph.out_degree_cap,
+                ),
+                ensure_ascii=False,
+            )
         if tool_name == "continuity_reindex_vectors" and self._store is not None:
             return json.dumps(
                 handle_reindex_vectors(
