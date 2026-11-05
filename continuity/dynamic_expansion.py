@@ -42,7 +42,6 @@ def propose_expansion_terms(
     Candidates are expected to be CandidateScore-like objects with record and
     score attributes.  This loose coupling avoids importing retrieval internals.
     """
-
     del store  # reserved for graph-neighbor expansion; keeps API stable.
     proposed: dict[str, ExpansionTerm] = {}
     normalized_query = {
@@ -51,6 +50,9 @@ def propose_expansion_terms(
     if not normalized_query or (
         len(normalized_query) <= 1 and next(iter(normalized_query), "") in {"now", "ok"}
     ):
+        return []
+    strong_query_tokens = normalized_query - GENERIC_EXPANSION_ANCHOR_TOKENS
+    if not strong_query_tokens:
         return []
 
     for candidate in candidates:
@@ -63,12 +65,44 @@ def propose_expansion_terms(
         _collect_record_terms(
             proposed,
             record,
-            normalized_query,
+            strong_query_tokens,
             stats,
             source_record_id=record.id,
         )
 
     return sorted(proposed.values(), key=lambda term: (-term.score, term.term))[:max_terms]
+
+
+# Generic verbs/filler that must not, by themselves, anchor expansion-term
+# harvesting.  Observed: "what phone do I use" harvested "sync api",
+# "page wait for selector" etc. from a browser-skill record whose only link
+# to the query was the token "use".
+GENERIC_EXPANSION_ANCHOR_TOKENS = frozenset(
+    {
+        "use",
+        "uses",
+        "using",
+        "used",
+        "handle",
+        "make",
+        "makes",
+        "get",
+        "gets",
+        "need",
+        "needs",
+        "want",
+        "wants",
+        "like",
+        "likes",
+        "know",
+        "knows",
+        "think",
+        "help",
+        "should",
+        "best",
+        "good",
+    }
+)
 
 
 def _candidate_has_anchor(candidate: object) -> bool:

@@ -193,7 +193,37 @@ RETRIEVAL_HELPFULNESS_CONTEXT_TOKENS = frozenset(
 )
 
 PREFERENCE_QUERY_TOKENS = frozenset(
-    {"prefer", "preference", "prefs", "style", "work_style", "handle"}
+    # "handle" deliberately excluded: "how do we handle X" is a procedural
+    # question, not a personal-preference query.  Treating it as preference
+    # intent tagged such queries with the personal_preference facet and made
+    # software-project records facet-incompatible (observed: firmware-update
+    # queries rejecting the project's own design records).
+    {"prefer", "preference", "prefs", "style", "work_style"}
+)
+
+# First-person ownership/attribute questions ("what car do I drive?",
+# "what phone do I use", "which OS am I running").  These queries carry a
+# strong personal anchor but often share zero lexical tokens with the
+# personal record that answers them, so the weak-vector-only gate would
+# otherwise reject the correct answer.
+OWNERSHIP_QUERY_TOKENS = frozenset(
+    {
+        "own",
+        "drive",
+        "riding",
+        "ride",
+        "carry",
+        "wear",
+        "use",
+        "using",
+        "run",
+        "running",
+        "play",
+        "playing",
+        "fly",
+        "flying",
+        "daily",
+    }
 )
 
 FACET_TOKEN_MAP = {
@@ -407,6 +437,7 @@ class ContinuityRetriever:
         effective_comparison_intent = comparison_intent or has_comparison_intent(query)
         personal_query = bool(raw_tokens & PERSONAL_QUERY_RAW_TERMS)
         preference_query = _is_preference_query(expanded_tokens, personal_query=personal_query)
+        ownership_query = personal_query and bool(expanded_tokens & OWNERSHIP_QUERY_TOKENS)
         memory_meta_query = _is_memory_meta_query(expanded_tokens)
         retrieval_helpfulness_meta_query = _is_retrieval_helpfulness_meta_query(raw_tokens)
         if retrieval_helpfulness_meta_query:
@@ -525,9 +556,22 @@ class ContinuityRetriever:
             if self.gate_config.weak_vector_only and _is_weak_vector_only_candidate(
                 candidate, self.gate_config
             ):
-                candidate.rejected_reason = "weak_vector_only_without_anchor"
-                rejected.append(candidate)
-                continue
+                # First-person ownership/attribute questions ("what car do I
+                # drive?") legitimately reach personal records through vector
+                # similarity alone: the query noun often never appears in the
+                # record text.  Relax the vector-only gate for personal-kind
+                # records on such queries, at half the normal threshold.
+                if (
+                    ownership_query
+                    and candidate.record.kind in PERSONAL_KINDS
+                    and candidate.vector_score
+                    >= self.gate_config.min_vector_only_relevance * 0.5
+                ):
+                    candidate.reasons.append("ownership_query_vector_rescue")
+                else:
+                    candidate.rejected_reason = "weak_vector_only_without_anchor"
+                    rejected.append(candidate)
+                    continue
             _apply_scope_score(candidate, expanded_tokens, effective_scope)
             _apply_boosts_and_penalties(candidate, personal_query=personal_query)
             if (
