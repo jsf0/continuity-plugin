@@ -121,12 +121,27 @@ ${HERMES_HOME:-$HOME/.hermes}/continuity/continuity.db
 
 ## Enable the provider
 
+There are **two independent switches**: the memory provider setting in your
+Hermes config, and the plugin enable flag. Both are required. Set the
+provider first:
+
 Edit your main Hermes config, usually `~/.hermes/config.yaml`, and start with the minimal config:
 
 ```yaml
 memory:
   provider: continuity
 ```
+
+Then enable the plugin itself:
+
+```bash
+hermes plugins enable continuity
+```
+
+> **Do not skip the plugin enable.** `hermes doctor` can report the memory
+> provider as active even while the plugin is disabled, so a missing
+> `plugins: enabled: [continuity]` entry fails silently: continuity tools
+> never appear and no memory is stored.
 
 That is enough for a first install. The built-in defaults enable conservative retrieval, provider guidance, association-graph search, and a tiny Tier 0 pinned-memory prompt. Optional vector retrieval is **off** unless you enable it.
 

@@ -211,4 +211,3 @@ def test_expansion_still_harvests_from_strongly_anchored_candidates(tmp_path: Pa
     harvested = {term.term for term in terms}
     assert harvested  # positive control: real anchors still expand
     assert "racadm" in harvested
-

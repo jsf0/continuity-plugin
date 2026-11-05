@@ -568,7 +568,6 @@ def test_association_graph_cuts_conflicting_context_neighbor(tmp_path: Path) -> 
     )
 
 
-
 def test_upsert_auto_creates_source_reference_edges_for_identity_targets(tmp_path: Path) -> None:
     store = ContinuityStore(tmp_path / "continuity.db")
     store.migrate()

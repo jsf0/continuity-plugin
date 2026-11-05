@@ -57,10 +57,18 @@ cat <<MSG
 Installed Hermes Continuity Memory plugin to:
   $TARGET_DIR
 
-Enable it with Hermes config:
+Enable it with Hermes config and plugin flag:
 
 memory:
   provider: continuity
+
+and:
+
+    hermes plugins enable continuity
+
+Both switches are required and independent; without the plugin enable,
+Hermes doctor may still report the provider as active while continuity
+tools never appear.
 
 Then restart Hermes or start a new session.
 MSG

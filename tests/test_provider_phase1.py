@@ -126,8 +126,6 @@ def test_provider_upsert_disables_association_creation_when_graph_disabled(tmp_p
     assert store.upsert_kwargs["create_associations"] is False
 
 
-
-
 def test_status_reports_association_candidate_limit(tmp_path: Path) -> None:
     provider = ContinuityProvider()
     provider.initialize(

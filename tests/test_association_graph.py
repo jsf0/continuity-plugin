@@ -3,10 +3,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+import continuity.store as store_mod
 from continuity.models import ContextRecord
 from continuity.reranking import RerankHit
 from continuity.retrieval import ContinuityRetriever
-import continuity.store as store_mod
 from continuity.store import ContinuityStore
 
 
@@ -865,7 +865,6 @@ def test_non_memory_query_does_not_match_continuity_eval_record_that_quotes_it(t
     assert rejected["continuity_eval"].rejected_reason == "memory_system_record_without_meta_query"
 
 
-
 def test_upsert_association_creation_scores_only_active_records(tmp_path, monkeypatch):
     store = ContinuityStore(tmp_path / "continuity.db")
     store.migrate()
@@ -904,7 +903,6 @@ def test_upsert_association_creation_scores_only_active_records(tmp_path, monkey
     )
 
     assert compared_ids == ["active"]
-
 
 
 def test_upsert_association_creation_scores_only_candidate_limit(tmp_path, monkeypatch):

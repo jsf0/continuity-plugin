@@ -12,7 +12,6 @@ from pathlib import Path
 from .association import association_strength
 from .models import AssociationEdge, ContextRecord, SkillLink, SourceRef, utc_now
 from .security import sanitize_observation_text
-
 from .vocabulary import normalize_phrase, tokenize_text
 
 SCHEMA_VERSION = 8
@@ -1104,9 +1103,7 @@ class ContinuityStore:
             ),
         )
 
-    def _replace_association_terms(
-        self, conn: sqlite3.Connection, record: ContextRecord
-    ) -> None:
+    def _replace_association_terms(self, conn: sqlite3.Connection, record: ContextRecord) -> None:
         conn.execute(
             "DELETE FROM context_record_association_terms WHERE record_id = ?", (record.id,)
         )
@@ -1376,7 +1373,9 @@ def _association_index_terms(record: ContextRecord) -> list[tuple[str, str, floa
     for tag in record.tags:
         add(tag, "tag", 2.0)
     for token in tokenize_text(
-        " ".join([record.title, record.summary, record.details or "", *record.tags, *record.entities])
+        " ".join(
+            [record.title, record.summary, record.details or "", *record.tags, *record.entities]
+        )
     ):
         add(token, "text", 1.0)
     return [(term, term_kind, weight) for (term, term_kind), weight in sorted(terms.items())]

@@ -59,6 +59,18 @@ memory:
   provider: continuity
 ```
 
+Then enable the plugin itself — the provider setting and the plugin enable
+flag are **two independent switches**, and both are required:
+
+```bash
+hermes plugins enable continuity
+```
+
+> **Do not skip the plugin enable.** `hermes doctor` can report the memory
+> provider as active even while the plugin is disabled (a missing
+> `plugins: enabled: [continuity]` entry), so the omission fails silently:
+> continuity tools never appear and no memory is stored.
+
 Recommended dependency-free first-install config:
 
 ```yaml

@@ -115,7 +115,6 @@ def test_list_quality_inventory_reports_sparse_records(tmp_path: Path) -> None:
     assert "sparse_metadata" in inventory[0]["warnings"]
 
 
-
 def test_upsert_indexes_association_candidate_terms(tmp_path: Path) -> None:
     store = ContinuityStore(tmp_path / "continuity.db")
     store.migrate()

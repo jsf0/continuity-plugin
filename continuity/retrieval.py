@@ -564,8 +564,7 @@ class ContinuityRetriever:
                 if (
                     ownership_query
                     and candidate.record.kind in PERSONAL_KINDS
-                    and candidate.vector_score
-                    >= self.gate_config.min_vector_only_relevance * 0.5
+                    and candidate.vector_score >= self.gate_config.min_vector_only_relevance * 0.5
                 ):
                     candidate.reasons.append("ownership_query_vector_rescue")
                 else:
