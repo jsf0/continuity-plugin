@@ -55,6 +55,8 @@ class RetrievalGateConfig:
     strong_fts_anchor_reranker_bypass: bool = True
     graph_inclusion_respects_reranker: bool = True
     graph_reranker_respect_floor: float = 0.005
+    self_referential_echo_penalty: bool = True
+    self_referential_echo_weight: float = 1.0
 
 
 @dataclass(frozen=True)
@@ -182,6 +184,13 @@ class ContinuityConfig:
                 ),
                 graph_reranker_respect_floor=min(
                     1.0, max(0.0, _float(gates.get("graph_reranker_respect_floor"), 0.005))
+                ),
+                self_referential_echo_penalty=_bool(
+                    gates.get("self_referential_echo_penalty"), True
+                ),
+                self_referential_echo_weight=min(
+                    5.0,
+                    max(0.0, _float(gates.get("self_referential_echo_weight"), 1.0)),
                 ),
             ),
             pinned_system_prompt=PinnedSystemPromptConfig(

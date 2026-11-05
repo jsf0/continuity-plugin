@@ -5,6 +5,25 @@ All notable changes to Hermes Continuity Memory are documented here.
 This project uses pre-1.0 semantic versioning. Minor versions may change plugin
 behavior while the provider API is still stabilizing.
 
+## 0.1.8 — 2026-11-05
+
+### Added
+
+- Self-referential echo penalty (`retrieval_gates.self_referential_echo_penalty`,
+  default on; `self_referential_echo_weight`, default 1.0 = fraction of base
+  relevance subtracted). Memory-system fix/debug notes often embed the exact
+  colloquial query they document ("what oil should I use"), so they won FTS on
+  that query and outranked the genuine answer records — observed live: a
+  retrieval fix-note scored 17.9 on an oil question while the car's oil-spec
+  record scored 7.0. When a memory_system-facet record contains every content
+  token of a non-memory multi-word query, its lexical score is demoted
+  proportionally (not rejected — it may still be a legitimate answer).
+  Memory-facet queries are exempt, non-memory records are exempt, and queries
+  under three raw words are exempt. Live A/B: the oil-spec record went from #5
+  to #1 on "what oil should I use"; fix-notes dropped out of the top-5 on the
+  oil, car, and backup queries while remaining fully rankable on memory-system
+  queries. Five regression tests in tests/test_self_referential_echo.py.
+
 ## 0.1.7 — 2026-11-05
 
 ### Added

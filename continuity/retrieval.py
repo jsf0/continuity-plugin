@@ -627,6 +627,18 @@ class ContinuityRetriever:
                 candidate.rejected_reason = "facet_incompatible_candidate"
                 rejected.append(candidate)
                 continue
+            if self.gate_config.self_referential_echo_penalty and _self_referential_echo(
+                query, tokens, candidate.record, query_facets, record_facets
+            ):
+                # Memory-system note echoing the query's tokens: demote
+                # proportionally (weight = fraction of base relevance; the
+                # default 1.0 zeroes out the echo-driven lexical score),
+                # don't reject — it may still be a legitimate answer.
+                candidate.penalties += (
+                    self.gate_config.self_referential_echo_weight * candidate.base_relevance
+                )
+                if "self_referential_echo" not in candidate.reasons:
+                    candidate.reasons.append("self_referential_echo")
             if (
                 self.gate_config.project_status_anchor
                 and candidate.record.kind == "active_project_state"
@@ -1480,6 +1492,41 @@ def _memory_system_record_without_meta_query(
     return record.scope_project == "hermes-continuity-memory" or bool(
         record_tags & MEMORY_META_RECORD_ANCHORS
     )
+
+
+def _echo_normalize(text: str) -> str:
+    """Lowercase, strip punctuation to spaces, collapse whitespace."""
+    return " ".join(re.findall(r"[a-z0-9]+", text.lower()))
+
+
+def _self_referential_echo(
+    query: str,
+    tokens: set[str],
+    record: ContextRecord,
+    query_facets: set[str],
+    record_facets: set[str],
+) -> bool:
+    """True when a memory-system record matches a non-memory query only by
+    echoing its tokens (the self-referential fix-note failure mode).
+
+    Fix/debug notes about the memory system often embed the exact colloquial
+    query they document ("what oil should I use"), so they win FTS on that
+    query despite being about retrieval, not about oil. A genuine answer
+    record almost never contains every content token of the user's question;
+    notes quoting the query do (the quoted core covers extra context words
+    too, e.g. "car" appears in the note's "car query" phrasing). Only
+    memory_system-facet records are eligible: preference mirrors legitimately
+    quote stored instructions, and memory queries (query facet =
+    memory_system) are exempt.
+    """
+    if "memory_system" in query_facets or "memory_system" not in record_facets:
+        return False
+    if len(_echo_normalize(query).split()) < 3:
+        # Short queries echo too often; require a real multi-word question.
+        return False
+    if not tokens:
+        return False
+    return tokens <= _record_text_tokens(record)
 
 
 def _apply_metadata_score(

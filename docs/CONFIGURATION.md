@@ -460,6 +460,18 @@ Plain English:
 - If personal facts like vehicle/setup/preferences are rejected as `below_min_reranker_score` despite strong tag/entity matches, keep this enabled.
 - If personal records bypass the reranker too aggressively, disable this or improve tags/entities so only truly strong anchors match.
 
+### `retrieval_gates.self_referential_echo_penalty` / `retrieval_gates.self_referential_echo_weight`
+
+Demotes memory-system records that match a non-memory query only by echoing the query's own tokens. Fix/debug notes about the memory system routinely embed the colloquial query they document ("what oil should I use"), which made them win FTS on that query and outrank the genuine answer records. When a `memory_system`-facet record contains every content token of a non-memory query of three or more raw words, a penalty of `self_referential_echo_weight * base_relevance` (default weight `1.0`, i.e. the echo-driven lexical score is zeroed) is subtracted. The record is demoted, not rejected. Memory-facet queries and non-memory records are exempt.
+
+Default: `true` / `1.0`.
+
+Plain English:
+
+- If a fix-note about retrieval outranks the real answer on a non-memory query, keep this enabled and check the note carries the `self_referential_echo` reason in `continuity_debug_retrieval`.
+- If a memory note is a legitimate answer to a non-memory query but keeps getting demoted, lower the weight (e.g. `1.0 -> 0.5`) or, better, rephrase the note so it stops quoting colloquial queries verbatim.
+- Do not disable this to make debug notes reachable; ask memory questions with memory words (`continuity`, `retrieval`, `plugin`) instead — those are exempt.
+
 ### Tuning workflow
 
 1. Run `continuity_debug_retrieval` for a failing positive query and a nearby negative/noise query.
