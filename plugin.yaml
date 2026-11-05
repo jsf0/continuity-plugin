@@ -1,4 +1,6 @@
 name: continuity
 description: Local-first structured continuity memory with scoped retrieval for Hermes Agent.
-version: 0.1.0
+version: 0.1.6
 provider: memory
+python_dependencies:
+  - sentence-transformers>=3.0,<6
