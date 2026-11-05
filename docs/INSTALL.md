@@ -292,7 +292,7 @@ memory:
     vector:
       enabled: true
       backend: sentence-transformers
-      embedding_model: BAAI/bge-small-en-v1.5
+      embedding_model: mixedbread-ai/mxbai-embed-large-v1
     reranker:
       enabled: true
       backend: sentence-transformers

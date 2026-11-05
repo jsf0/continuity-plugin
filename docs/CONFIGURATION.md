@@ -217,6 +217,7 @@ Examples:
 ```text
 hash-v1
 BAAI/bge-small-en-v1.5
+mixedbread-ai/mxbai-embed-large-v1
 ```
 
 ### `vector.batch_size`

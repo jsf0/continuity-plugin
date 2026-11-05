@@ -214,13 +214,27 @@ memory:
     vector:
       enabled: true
       backend: sentence-transformers
-      embedding_model: BAAI/bge-small-en-v1.5
+      embedding_model: mixedbread-ai/mxbai-embed-large-v1
     reranker:
       enabled: true
       backend: sentence-transformers
       model: mixedbread-ai/mxbai-rerank-base-v2
       min_score: 0.15
 ```
+
+> **Embedding model note.** A labeled bake-off on a real 77-record continuity
+> corpus (Nov 2026; 18 paraphrase-style queries, per-model query prefixes,
+> cosine ranking on production `embedding_text`) found
+> `mixedbread-ai/mxbai-embed-large-v1` the best `sentence-transformers`
+> compatible embedder: 18/18 candidate recall within the reranker's top-20
+> window, MRR 0.71, worst-case rank 11. `BAAI/bge-small-en-v1.5` missed one
+> relevant record entirely (rank 42), `bge-base` measured worse than
+> `bge-small` on this corpus, and `e5-small-v2` / `all-MiniLM-L6-v2` traded
+> precision for speed. mxbai also needs no query-side prefix (the bge family
+> performs best with one). The larger model costs ~1.3 GB RAM and a one-time
+> full-corpus embed (~55 s for 80 records on CPU); thanks to incremental
+> indexing (0.1.7) restarts only embed new or changed records. Always
+> re-measure on your own corpus.
 
 > **Reranker model note.** An evaluation on a real 150-record continuity
 > corpus (Nov 2026) found `mixedbread-ai/mxbai-rerank-base-v2` clearly the

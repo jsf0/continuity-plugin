@@ -5,6 +5,47 @@ All notable changes to Hermes Continuity Memory are documented here.
 This project uses pre-1.0 semantic versioning. Minor versions may change plugin
 behavior while the provider API is still stabilizing.
 
+## 0.1.7 — 2026-11-05
+
+### Added
+
+- Incremental vector indexing: `upsert()` stores a sha256 of the embedding
+  text (new `context_record_vectors.text_hash` column, added by an idempotent
+  migration) and skips the model call when the stored vector was built from
+  identical text. Previously every provider initialization re-embedded the
+  entire corpus — O(corpus) model calls per gateway restart, which is
+  minutes-scale with a large neural embedder. Startup embed cost is now
+  O(new/changed records); legacy rows without a hash are re-embedded once,
+  then skipped. Live-verified: a second restart embedded zero records.
+
+### Changed
+
+- README now recommends `mixedbread-ai/mxbai-embed-large-v1` as the optional
+  embedding model, based on a labeled bake-off on a real 77-record continuity
+  corpus (18 paraphrase-style queries, per-model query prefixes, cosine
+  ranking on production `embedding_text`): 18/18 candidate recall@20, MRR
+  0.71, worst-case rank 11 — versus `bge-small-en-v1.5` at 17/18, worst-case
+  rank 42 (one relevant record fell entirely outside the reranker window).
+  `bge-base` measured worse than `bge-small` on this corpus; `e5-small-v2`
+  and `all-MiniLM-L6-v2` also evaluated. mxbai needs no query-side prefix
+  (the bge family does, for best retrieval quality).
+
+## 0.1.6 — 2026-11-05
+
+### Fixed
+
+- The provider expected a `continuity_config` kwarg that Hermes core never
+  passes: `MemoryManager.initialize_all()` forwards only session-scoping
+  kwargs, so the plugin silently ran with all-default config — vector and
+  reranker backends disabled despite being enabled in config.yaml. The
+  provider now self-loads the `memory.continuity` config section via
+  `hermes_cli.config.load_config()` (best-effort, profile-aware) when the
+  kwarg is absent.
+- `plugin.yaml` now declares `python_dependencies` (sentence-transformers)
+  in the repo. The equivalent installed-copy-only hotfix from Nov 3 was
+  silently wiped by every repo deployment, and the package-manager sync
+  then dropped the dependency from the shared gateway environment.
+
 ## 0.1.5 — 2026-11-05
 
 ### Changed
