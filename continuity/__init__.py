@@ -89,6 +89,23 @@ class ContinuityProvider(MemoryProvider):
         """Return whether the provider can run in this environment."""
         return True
 
+    @staticmethod
+    def _load_native_config() -> dict:
+        """Read the ``memory.continuity`` section from the active Hermes config.
+
+        Best-effort: any failure yields an empty mapping (all-default config),
+        never blocks provider startup. ``load_config()`` honors the active
+        profile's HERMES_HOME, so a per-profile config.yaml is respected.
+        """
+        try:
+            from hermes_cli.config import load_config
+
+            memory = load_config().get("memory", {})
+            section = memory.get("continuity", {}) if isinstance(memory, dict) else {}
+            return section if isinstance(section, dict) else {}
+        except Exception:
+            return {}
+
     def initialize(self, session_id: str, **kwargs: object) -> None:
         """Initialize provider-local state for a Hermes session."""
         hermes_home_value = kwargs.get("hermes_home")
@@ -106,9 +123,16 @@ class ContinuityProvider(MemoryProvider):
         self._platform = str(kwargs.get("platform") or "")
         self._agent_context = str(kwargs.get("agent_context") or "")
         raw_config = kwargs.get("continuity_config")
-        self._config = ContinuityConfig.from_mapping(
-            raw_config if isinstance(raw_config, dict) else {}
-        )
+        if not isinstance(raw_config, dict):
+            # Hermes core passes only session-scoping kwargs to initialize()
+            # (agent_init._memory_provider_init_kwargs) — there is no
+            # documented `continuity_config` kwarg, so the memory.continuity
+            # config.yaml section must be loaded here or every non-default
+            # setting (vector/reranker backends, gates, dream) silently
+            # reverts to dataclass defaults. Without this the live gateway
+            # ran FTS-only with both semantic backends disabled.
+            raw_config = self._load_native_config()
+        self._config = ContinuityConfig.from_mapping(raw_config)
         self._project = detect_project()
         self._store = ContinuityStore(data_dir / "continuity.db")
         self._store.migrate()
