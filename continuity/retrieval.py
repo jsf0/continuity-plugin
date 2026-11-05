@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -38,6 +39,11 @@ MIN_VECTOR_RELEVANCE = 0.05
 # lexical/tag/entity/FTS anchor at all, require a stronger semantic score so
 # generic status/debug queries do not pull unrelated high-confidence memories.
 MIN_VECTOR_ONLY_RELEVANCE = 2.75
+# A candidate whose bm25 match quality clears this earns a reranker bypass:
+# the record answers the query lexically even when a generic cross-encoder
+# is cold on its terse phrasing (fts_score = magnitude/(magnitude+1), so
+# 0.7 corresponds to a bm25 rank magnitude of ~2.33).
+STRONG_FTS_ANCHOR_SCORE = 0.7
 TRUST_PENALTIES = {
     "remote_untrusted": 1.0,
 }
@@ -464,6 +470,15 @@ class ContinuityRetriever:
         query_facets = _facets_for_tokens(expanded_tokens)
         candidates: dict[str, CandidateScore] = {}
         effective_scope = str(scope_project) if scope_project else None
+        # Corpus term statistics for text-anchor distinctiveness: flat
+        # per-token text bonuses credit generic filler ("use", "nov") as
+        # much as distinctive terms, which was the lexical half of the
+        # association-hub noise problem.
+        metadata_stats = CorpusTermStats.from_records(
+            record
+            for record in self.store.list_records()
+            if include_stale or not _is_inactive_or_expired(record)
+        )
 
         fts_query = " ".join(sorted(expanded_tokens))
         if fts_query:
@@ -494,7 +509,7 @@ class ContinuityRetriever:
             if not include_stale and _is_inactive_or_expired(record):
                 continue
             candidate = candidates.setdefault(record.id, CandidateScore(record))
-            _apply_metadata_score(candidate, expanded_tokens)
+            _apply_metadata_score(candidate, expanded_tokens, metadata_stats)
             _apply_exact_identifier_score(candidate, raw_tokens)
             if candidate.base_relevance <= 0:
                 candidates.pop(record.id, None)
@@ -540,7 +555,7 @@ class ContinuityRetriever:
                     continue
                 candidate = candidates.setdefault(record.id, CandidateScore(record))
                 before = candidate.base_relevance
-                _apply_metadata_score(candidate, new_tokens)
+                _apply_metadata_score(candidate, new_tokens, metadata_stats)
                 _apply_exact_identifier_score(candidate, raw_tokens)
                 if before <= 0 and candidate.base_relevance <= 0:
                     candidates.pop(record.id, None)
@@ -725,6 +740,12 @@ class ContinuityRetriever:
                 ):
                     candidate.reasons.append("strong_personal_anchor")
                     continue
+                if (
+                    self.gate_config.strong_fts_anchor_reranker_bypass
+                    and _reranker_rejection_overridden_by_strong_fts(candidate)
+                ):
+                    candidate.reasons.append("strong_fts_anchor")
+                    continue
                 candidate.rejected_reason = "below_min_reranker_score"
                 selected.remove(candidate)
                 rejected.append(candidate)
@@ -897,6 +918,25 @@ class ContinuityRetriever:
                 candidate = CandidateScore(record)
                 candidates_by_id[neighbor_id] = candidate
             if candidate in rejected:
+                if (
+                    self.gate_config.graph_inclusion_respects_reranker
+                    and candidate.rejected_reason == "below_min_reranker_score"
+                    and candidate.reranker_score < self.gate_config.graph_reranker_respect_floor
+                ):
+                    # The cross-encoder examined this record against the
+                    # query and scored it essentially zero (observed:
+                    # browser mirrors at 3.7e-5 re-entered as neighbors of
+                    # other browser records).  Near-zero reranker verdicts
+                    # are respected over graph adjacency.  Cold-but-nonzero
+                    # records (>= floor) remain rescuable by design.
+                    trace["cut_neighbors"].append(
+                        {
+                            "record_id": neighbor_id,
+                            "activation": activation,
+                            "reason": "reranker_rejected_respected",
+                        }
+                    )
+                    continue
                 rejected.remove(candidate)
                 candidate.rejected_reason = None
             candidate.retrieval_role = "associative_neighbor"
@@ -1219,6 +1259,20 @@ def _reranker_rejection_overridden_by_exact_context_identifier(candidate: Candid
     )
 
 
+def _reranker_rejection_overridden_by_strong_fts(candidate: CandidateScore) -> bool:
+    """Preserve strong lexical matches when a generic reranker underscores them.
+
+    Local cross-encoders often under-score terse, metadata-style records that
+    genuinely answer a query (observed: an oil-eval record for the EJ257
+    scored 0.0027 for an oil question while a record that merely quoted the
+    query verbs scored 0.896).  A top-quality bm25 match is direct evidence
+    the record answers the query lexically, so keep it despite a cold
+    cross-encoder, mirroring the exact-context-identifier and
+    strong-personal-anchor bypasses.
+    """
+    return candidate.fts_score >= STRONG_FTS_ANCHOR_SCORE
+
+
 def _reranker_rejection_overridden_by_strong_personal_anchor(
     candidate: CandidateScore,
 ) -> bool:
@@ -1428,7 +1482,9 @@ def _memory_system_record_without_meta_query(
     )
 
 
-def _apply_metadata_score(candidate: CandidateScore, tokens: set[str]) -> None:
+def _apply_metadata_score(
+    candidate: CandidateScore, tokens: set[str], stats: CorpusTermStats | None = None
+) -> None:
     record = candidate.record
     record_tags = {_normalize_token(tag) for tag in record.tags}
     record_entities = {_normalize_token(entity) for entity in record.entities}
@@ -1446,7 +1502,21 @@ def _apply_metadata_score(candidate: CandidateScore, tokens: set[str]) -> None:
 
     text_matches = tokens & record_text_tokens
     if text_matches:
-        candidate.text_score += TEXT_MATCH_BONUS * len(text_matches)
+        if stats is not None:
+            # Weight each matched text token by corpus distinctiveness so a
+            # rare term earns full credit while corpus-generic filler earns
+            # almost none.  Reference is the IDF of a term appearing in a
+            # single document (the most distinctive a matched term can be);
+            # stats.idf("") is the unattainable df=0 bound, one log(2) above.
+            reference = stats.idf("") - math.log(2.0)
+            weight = (
+                sum(min(1.0, stats.idf(token) / reference) for token in text_matches)
+                if reference > 0
+                else float(len(text_matches))
+            )
+        else:
+            weight = float(len(text_matches))
+        candidate.text_score += TEXT_MATCH_BONUS * weight
         candidate.reasons.append("text")
 
 

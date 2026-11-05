@@ -423,7 +423,12 @@ def test_identity_query_context_rejects_other_manpage_commands(tmp_path: Path) -
 
     assert [candidate.record.id for candidate in debug["selected"]] == ["openbsd_ifconfig_8"]
     rejected = {candidate.record.id: candidate.rejected_reason for candidate in debug["rejected"]}
-    assert rejected["openbsd_route_8"] == "context_label_conflict:command"
+    assert rejected["openbsd_route_8"] in {
+        "context_label_conflict:command",
+        # With IDF-weighted text anchors, weak matches can fall below the
+        # base-relevance gate before the context-label conflict is recorded.
+        "below_min_base_relevance",
+    }
 
 
 def test_identity_query_context_rejects_unlabeled_manpage_like_records(tmp_path: Path) -> None:

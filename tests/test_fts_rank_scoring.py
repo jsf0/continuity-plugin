@@ -45,6 +45,17 @@ def _record(record_id: str, title: str, summary: str) -> ContextRecord:
 def test_retriever_scores_better_fts_match_higher(tmp_path: Path) -> None:
     store = ContinuityStore(tmp_path / "continuity.db")
     store.migrate()
+    # SQLite bm25 idf is corpus-relative: in a two-record store every rank
+    # magnitude collapses to ~0, so seed enough filler records for "oil" to
+    # have real inverse document frequency.
+    for index in range(10):
+        store.upsert_record(
+            _record(
+                f"r_filler_{index}",
+                f"Filler record {index} about topic{index}",
+                f"Filler content {index} entirely about topic{index} matters.",
+            )
+        )
     # Record A is a strong match: the rare query term appears repeatedly.
     store.upsert_record(
         _record(

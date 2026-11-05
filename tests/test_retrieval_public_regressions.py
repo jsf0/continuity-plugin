@@ -503,7 +503,12 @@ def test_strong_personal_anchor_bypass_can_be_disabled(tmp_path: Path) -> None:
         reranker_backend=RejectingReranker(),
         reranker_min_score=0.15,
         association_enabled=False,
-        gate_config=RetrievalGateConfig(strong_personal_anchor_reranker_bypass=False),
+        gate_config=RetrievalGateConfig(
+            strong_personal_anchor_reranker_bypass=False,
+            # Isolate the flag under test: keep the independent FTS-anchor
+            # bypass out of this scenario.
+            strong_fts_anchor_reranker_bypass=False,
+        ),
     ).debug_search("how much camper can I pull with my setup?", limit=5)
 
     selected_ids = {candidate.record.id for candidate in debug["selected"]}

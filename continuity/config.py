@@ -52,6 +52,9 @@ class RetrievalGateConfig:
     personal_project: bool = True
     activation_anchor: bool = True
     strong_personal_anchor_reranker_bypass: bool = True
+    strong_fts_anchor_reranker_bypass: bool = True
+    graph_inclusion_respects_reranker: bool = True
+    graph_reranker_respect_floor: float = 0.005
 
 
 @dataclass(frozen=True)
@@ -170,6 +173,15 @@ class ContinuityConfig:
                 activation_anchor=_bool(gates.get("activation_anchor"), True),
                 strong_personal_anchor_reranker_bypass=_bool(
                     gates.get("strong_personal_anchor_reranker_bypass"), True
+                ),
+                strong_fts_anchor_reranker_bypass=_bool(
+                    gates.get("strong_fts_anchor_reranker_bypass"), True
+                ),
+                graph_inclusion_respects_reranker=_bool(
+                    gates.get("graph_inclusion_respects_reranker"), True
+                ),
+                graph_reranker_respect_floor=min(
+                    1.0, max(0.0, _float(gates.get("graph_reranker_respect_floor"), 0.005))
                 ),
             ),
             pinned_system_prompt=PinnedSystemPromptConfig(

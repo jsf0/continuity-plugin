@@ -640,7 +640,12 @@ def test_wrapper_query_direct_memory_does_not_let_unrelated_mirror_seed_graph(tm
     assert "framework_boot" not in [
         seed["record_id"] for seed in debug["activation_trace"]["activation_seeds"]
     ]
-    assert rejected["framework_boot"].rejected_reason == "weak_anchor_activation_seed"
+    assert rejected["framework_boot"].rejected_reason in {
+        "weak_anchor_activation_seed",
+        # With IDF-weighted text anchors, weak matches can fall below the
+        # base-relevance gate before the activation-anchor gate runs.
+        "below_min_base_relevance",
+    }
 
 
 def test_strong_project_anchor_can_still_seed_association_graph(tmp_path):
@@ -811,6 +816,9 @@ def test_software_framework_query_does_not_pull_hardware_records_via_graph(tmp_p
         "facet_incompatible_candidate",
         "facet_incompatible_activation_seed",
         "weak_anchor_activation_seed",
+        # With IDF-weighted text anchors, weak matches can fall below the
+        # base-relevance gate first.
+        "below_min_base_relevance",
     }
 
 

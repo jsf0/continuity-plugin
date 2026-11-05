@@ -5,6 +5,31 @@ All notable changes to Hermes Continuity Memory are documented here.
 This project uses pre-1.0 semantic versioning. Minor versions may change plugin
 behavior while the provider API is still stabilizing.
 
+## 0.1.4 — 2026-11-05
+
+### Added
+
+- `strong_fts_anchor_reranker_bypass` gate (default on): a strong bm25
+  match (fts_score >= 0.7) survives a cold cross-encoder verdict, mirroring
+  the existing exact-context-identifier and strong-personal-anchor
+  bypasses. Local cross-encoders under-score terse, metadata-style records
+  that genuinely answer a query (observed: an oil-eval record for the EJ257
+  scored 0.0027 for an oil question while a record merely quoting the query
+  verbs scored 0.896).
+- `graph_inclusion_respects_reranker` gate with `graph_reranker_respect_floor`
+  (default 0.005): records the cross-encoder scored essentially zero are no
+  longer resurrected as association-graph neighbors (observed: browser
+  mirrors rejected at 3.7e-5 re-entered as neighbors of other browser
+  records). Cold-but-nonzero records remain graph-rescuable by design.
+
+### Fixed
+
+- Text-anchor scoring in `_apply_metadata_score` is now IDF-weighted per
+  matched token (reference: IDF of a df=1 term), so corpus-generic filler
+  earns almost no text credit instead of a flat +0.35 per token — the
+  lexical half of the association-hub noise problem. Corpus statistics are
+  computed once per retrieval and shared with dynamic expansion.
+
 ## 0.1.3 — 2026-11-05
 
 ### Fixed
