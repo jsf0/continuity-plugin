@@ -60,6 +60,10 @@ class VectorBackend(Protocol):
     def search(self, query: str, limit: int) -> list[VectorHit]: ...
 
 
+def _embedding_text_hash(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8", errors="replace")).hexdigest()
+
+
 class SQLiteHashVectorBackend:
     """SQLite-backed deterministic hashed-vector backend.
 
@@ -83,12 +87,16 @@ class SQLiteHashVectorBackend:
         return True
 
     def upsert(self, record_id: str, text: str) -> None:
+        text_hash = _embedding_text_hash(text)
+        if self.store.vector_text_hash(record_id, model=self.model) == text_hash:
+            return  # already embedded from identical text — skip the recompute
         vector = embed_text(text, dimensions=self.dimensions)
         self.store.upsert_vector(
             record_id=record_id,
             model=self.model,
             dimensions=self.dimensions,
             vector=vector,
+            text_hash=text_hash,
         )
 
     def delete(self, record_id: str) -> None:
@@ -131,12 +139,16 @@ class SentenceTransformersVectorBackend:
         return True
 
     def upsert(self, record_id: str, text: str) -> None:
+        text_hash = _embedding_text_hash(text)
+        if self.store.vector_text_hash(record_id, model=self.model) == text_hash:
+            return  # already embedded from identical text — skip the model call
         vector = self.embed([text])[0]
         self.store.upsert_vector(
             record_id=record_id,
             model=self.model,
             dimensions=len(vector),
             vector=vector,
+            text_hash=text_hash,
         )
 
     def delete(self, record_id: str) -> None:

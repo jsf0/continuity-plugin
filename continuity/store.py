@@ -224,6 +224,7 @@ class ContinuityStore:
                     "quality_json": "TEXT NOT NULL DEFAULT '{}'",
                 },
             )
+            _ensure_context_vector_columns(conn, {"text_hash": "TEXT"})
             conn.execute(
                 "INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)",
                 (1, utc_now()),
@@ -957,16 +958,18 @@ class ContinuityStore:
         model: str,
         dimensions: int,
         vector: list[float],
+        text_hash: str | None = None,
     ) -> None:
         with self.connect() as conn:
             conn.execute(
                 """
-                INSERT INTO context_record_vectors(record_id, model, dimensions, vector_json, updated_at)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO context_record_vectors(record_id, model, dimensions, vector_json, updated_at, text_hash)
+                VALUES (?, ?, ?, ?, ?, ?)
                 ON CONFLICT(record_id, model) DO UPDATE SET
                   dimensions=excluded.dimensions,
                   vector_json=excluded.vector_json,
-                  updated_at=excluded.updated_at
+                  updated_at=excluded.updated_at,
+                  text_hash=excluded.text_hash
                 """,
                 (
                     record_id,
@@ -974,8 +977,21 @@ class ContinuityStore:
                     dimensions,
                     json.dumps(vector, separators=(",", ":")),
                     utc_now(),
+                    text_hash,
                 ),
             )
+
+    def vector_text_hash(self, record_id: str, *, model: str) -> str | None:
+        """Return the stored embedding-text hash for one vector, if any."""
+        with self.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT text_hash FROM context_record_vectors
+                WHERE record_id = ? AND model = ?
+                """,
+                (record_id, model),
+            ).fetchone()
+        return str(row["text_hash"]) if row and row["text_hash"] else None
 
     def delete_vector(self, record_id: str, *, model: str | None = None) -> None:
         with self.connect() as conn:
@@ -1225,6 +1241,16 @@ def _ensure_context_record_columns(conn: sqlite3.Connection, columns: dict[str, 
     for name, definition in columns.items():
         if name not in existing:
             conn.execute(f"ALTER TABLE context_records ADD COLUMN {name} {definition}")
+
+
+def _ensure_context_vector_columns(conn: sqlite3.Connection, columns: dict[str, str]) -> None:
+    existing = {
+        str(row["name"])
+        for row in conn.execute("PRAGMA table_info(context_record_vectors)").fetchall()
+    }
+    for name, definition in columns.items():
+        if name not in existing:
+            conn.execute(f"ALTER TABLE context_record_vectors ADD COLUMN {name} {definition}")
 
 
 def _record_row(record: ContextRecord) -> tuple[object, ...]:
