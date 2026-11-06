@@ -211,3 +211,43 @@ def test_expansion_still_harvests_from_strongly_anchored_candidates(tmp_path: Pa
     harvested = {term.term for term in terms}
     assert harvested  # positive control: real anchors still expand
     assert "racadm" in harvested
+
+
+def test_possessive_query_rescues_vector_only_personal_record(tmp_path: Path) -> None:
+    # Live failure (Nov 5 2026 autocross session): "what maintenance do I
+    # need for my car" has NO ownership verb (no drive/own/use), so the
+    # verb-based rescue never fired and the record died at the full
+    # weak-vector-only threshold. Possession ("my") must be enough.
+    store = _store_with(tmp_path, [_car_record()])
+    retriever = ContinuityRetriever(
+        store, vector_backend=StubVectorBackend([VectorHit("r_wrx", 0.7)])
+    )
+
+    hits = retriever.search("what maintenance do I need for my car", limit=3)
+
+    assert [hit.record.id for hit in hits] == ["r_wrx"]
+    assert "ownership_query_vector_rescue" in hits[0].reasons
+
+
+def test_possessive_rescue_still_requires_personal_kind_and_floor(
+    tmp_path: Path,
+) -> None:
+    store = _store_with(tmp_path, [_car_record()])
+    # Below the half-threshold floor: possession alone must not admit
+    # semantically weak hits.
+    retriever = ContinuityRetriever(
+        store, vector_backend=StubVectorBackend([VectorHit("r_wrx", 0.3)])
+    )
+    hits = retriever.search("what maintenance do I need for my car", limit=3)
+    assert not any("ownership_query_vector_rescue" in hit.reasons for hit in hits)
+
+
+def test_non_possessive_personal_query_not_rescued(tmp_path: Path) -> None:
+    # "what should I do" is personal but not possessive: no rescue. The gate
+    # stays strict for queries that don't reference the user's things.
+    store = _store_with(tmp_path, [_car_record()])
+    retriever = ContinuityRetriever(
+        store, vector_backend=StubVectorBackend([VectorHit("r_wrx", 0.7)])
+    )
+    hits = retriever.search("what should I do about upgrades", limit=3)
+    assert not any("ownership_query_vector_rescue" in hit.reasons for hit in hits)

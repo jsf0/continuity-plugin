@@ -170,6 +170,10 @@ WEAK_ANCHOR_TOKENS = (
     )
 )
 PERSONAL_QUERY_RAW_TERMS = frozenset({"i", "me", "my", "mine", "myself"})
+# Possessive determiners (raw): "my car", "our cluster", "mine". Distinct from
+# PERSONAL_QUERY_RAW_TERMS usage: a query like "what should I do" is personal
+# but not possessive; possessive queries ask about *the user's things*.
+POSSESSIVE_RAW_TERMS = frozenset({"my", "mine", "our", "ours"})
 PERSONAL_KINDS = frozenset({"user_preference", "user_fact", "personal_setup", "vehicle_fact"})
 PROJECT_STATUS_KINDS = frozenset({"active_project_state", "project_convention"})
 GENERIC_ASSOCIATION_EDGE_TYPES = frozenset({"tag_overlap", "semantic_similarity"})
@@ -444,6 +448,13 @@ class ContinuityRetriever:
         personal_query = bool(raw_tokens & PERSONAL_QUERY_RAW_TERMS)
         preference_query = _is_preference_query(expanded_tokens, personal_query=personal_query)
         ownership_query = personal_query and bool(expanded_tokens & OWNERSHIP_QUERY_TOKENS)
+        # Possessive attribute queries ("what maintenance does my car need")
+        # ask about the user's things WITHOUT ownership verbs (no drive/own/
+        # use), so the verb-based rescue never fired and personal records
+        # died at the full weak-vector-only threshold even when the embedder
+        # ranked them first. Possession alone is the same intent: reach the
+        # user's records through vector similarity, at the relaxed threshold.
+        possessive_query = personal_query and bool(raw_tokens & POSSESSIVE_RAW_TERMS)
         memory_meta_query = _is_memory_meta_query(expanded_tokens)
         retrieval_helpfulness_meta_query = _is_retrieval_helpfulness_meta_query(raw_tokens)
         if retrieval_helpfulness_meta_query:
@@ -577,7 +588,7 @@ class ContinuityRetriever:
                 # record text.  Relax the vector-only gate for personal-kind
                 # records on such queries, at half the normal threshold.
                 if (
-                    ownership_query
+                    (ownership_query or possessive_query)
                     and candidate.record.kind in PERSONAL_KINDS
                     and candidate.vector_score >= self.gate_config.min_vector_only_relevance * 0.5
                 ):

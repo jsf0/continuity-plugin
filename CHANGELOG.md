@@ -5,6 +5,25 @@ All notable changes to Hermes Continuity Memory are documented here.
 This project uses pre-1.0 semantic versioning. Minor versions may change plugin
 behavior while the provider API is still stabilizing.
 
+## 0.1.10 — 2026-11-05
+
+### Fixed
+
+- Possessive queries now get the weak-vector-only rescue. The ownership
+  rescue (8375651) fired only when the query contained an ownership VERB
+  (drive/own/use), so attribute questions like "what maintenance do I need
+  for my car" — possession but no verb — had no lexical anchor and personal
+  records died at the full vector-only threshold (2.75) even when the
+  embedder ranked them first (observed: vector score 1.46). A query
+  containing a possessive determiner ("my", "mine", "our", "ours") now
+  relaxes the gate to half threshold for PERSONAL_KINDS records, exactly
+  like ownership-verb queries. This is the general mechanism: the embedder
+  bridges the vocabulary gap ("car" -> "Subaru WRX STI") and the gate lets
+  the bridged candidate through — no per-record term additions needed. 3
+  regression tests in tests/test_ownership_query.py (rescue fires,
+  personal-kind + floor still required, non-possessive personal queries not
+  rescued).
+
 ## 0.1.9 — 2026-11-05
 
 ### Fixed
