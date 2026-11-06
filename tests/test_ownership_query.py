@@ -1,9 +1,13 @@
-"""Regression tests for ownership-query rescue and expansion-anchor hygiene.
+"""Regression tests for the semantic-candidate tier and expansion-anchor hygiene.
 
-Observed live failures that motivated these (Nov 2026):
-- "What car do I drive?" selected nothing: the personal vehicle record was
-  rejected by the weak-vector-only gate because the query shared no lexical
-  token with it ("car"/"drive" never appear in the record text).
+Observed live failures that motivated these (Nov 2026, v0.2.0 tier):
+- "What car do I drive?" and "what maintenance do I need for my car" selected
+  nothing: the personal vehicle record was rejected by the weak-vector-only
+  gate because the query shared no lexical token with it ("car"/"drive" never
+  appear in the record text). The semantic-candidate tier now offers the top
+  vector-only match above a raw-cosine floor to the consuming model, with no
+  query-pattern rules (the verb-based and possessive rescues it replaces were
+  whack-a-mole).
 - "how do we handle firmware updates for dell servers" rejected the
   project's own firmware-controller record because "handle" tagged the
   query as a personal-preference query, making the record facet-incompatible.
@@ -71,10 +75,10 @@ def _car_record() -> ContextRecord:
     )
 
 
-def test_ownership_query_rescues_vector_only_personal_record(tmp_path: Path) -> None:
+def test_ownership_query_offers_semantic_candidate(tmp_path: Path) -> None:
     store = _store_with(tmp_path, [_car_record()])
     # vector_score = 0.7 * 3.0 = 2.1: below the strict 2.75 vector-only gate,
-    # above the half-threshold ownership rescue window.
+    # but raw cosine 0.7 >= the 0.46 tier floor -> offered as semantic candidate.
     retriever = ContinuityRetriever(
         store, vector_backend=StubVectorBackend([VectorHit("r_wrx", 0.7)])
     )
@@ -82,7 +86,8 @@ def test_ownership_query_rescues_vector_only_personal_record(tmp_path: Path) -> 
     hits = retriever.search("What car do I drive?", limit=3)
 
     assert [hit.record.id for hit in hits] == ["r_wrx"]
-    assert "ownership_query_vector_rescue" in hits[0].reasons
+    assert "semantic_candidate" in hits[0].reasons
+    assert hits[0].retrieval_role == "semantic_candidate"
 
 
 def test_ownership_rescue_requires_personal_kind(tmp_path: Path) -> None:
@@ -109,9 +114,9 @@ def test_ownership_rescue_requires_personal_kind(tmp_path: Path) -> None:
     assert not any("ownership_query_vector_rescue" in hit.reasons for hit in hits)
 
 
-def test_ownership_rescue_threshold_still_rejects_weak_vectors(tmp_path: Path) -> None:
+def test_tier_floor_still_rejects_weak_vectors(tmp_path: Path) -> None:
     store = _store_with(tmp_path, [_car_record()])
-    # vector_score = 0.3 * 3.0 = 0.9: below the half-threshold rescue floor.
+    # vector_score = 0.3 * 3.0 = 0.9: raw cosine 0.3 < the 0.46 tier floor.
     retriever = ContinuityRetriever(
         store, vector_backend=StubVectorBackend([VectorHit("r_wrx", 0.3)])
     )
@@ -213,11 +218,11 @@ def test_expansion_still_harvests_from_strongly_anchored_candidates(tmp_path: Pa
     assert "racadm" in harvested
 
 
-def test_possessive_query_rescues_vector_only_personal_record(tmp_path: Path) -> None:
+def test_possessive_query_offers_semantic_candidate(tmp_path: Path) -> None:
     # Live failure (Nov 5 2026 autocross session): "what maintenance do I
-    # need for my car" has NO ownership verb (no drive/own/use), so the
-    # verb-based rescue never fired and the record died at the full
-    # weak-vector-only threshold. Possession ("my") must be enough.
+    # need for my car" has NO ownership verb, no possession trigger needed
+    # under the tier — the vector-only match above the floor is offered for
+    # ANY query shape. That is the whole point: no pattern rules.
     store = _store_with(tmp_path, [_car_record()])
     retriever = ContinuityRetriever(
         store, vector_backend=StubVectorBackend([VectorHit("r_wrx", 0.7)])
@@ -226,7 +231,7 @@ def test_possessive_query_rescues_vector_only_personal_record(tmp_path: Path) ->
     hits = retriever.search("what maintenance do I need for my car", limit=3)
 
     assert [hit.record.id for hit in hits] == ["r_wrx"]
-    assert "ownership_query_vector_rescue" in hits[0].reasons
+    assert "semantic_candidate" in hits[0].reasons
 
 
 def test_possessive_rescue_still_requires_personal_kind_and_floor(
@@ -242,12 +247,13 @@ def test_possessive_rescue_still_requires_personal_kind_and_floor(
     assert not any("ownership_query_vector_rescue" in hit.reasons for hit in hits)
 
 
-def test_non_possessive_personal_query_not_rescued(tmp_path: Path) -> None:
-    # "what should I do" is personal but not possessive: no rescue. The gate
-    # stays strict for queries that don't reference the user's things.
+def test_non_possessive_query_also_gets_the_offer(tmp_path: Path) -> None:
+    # Pattern-free by design: even without "my"/"drive"/"own", a strong
+    # vector-only match is offered. The consuming model disposes.
     store = _store_with(tmp_path, [_car_record()])
     retriever = ContinuityRetriever(
         store, vector_backend=StubVectorBackend([VectorHit("r_wrx", 0.7)])
     )
     hits = retriever.search("what should I do about upgrades", limit=3)
-    assert not any("ownership_query_vector_rescue" in hit.reasons for hit in hits)
+    assert hits and hits[0].record.id == "r_wrx"
+    assert "semantic_candidate" in hits[0].reasons

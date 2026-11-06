@@ -5,6 +5,49 @@ All notable changes to Hermes Continuity Memory are documented here.
 This project uses pre-1.0 semantic versioning. Minor versions may change plugin
 behavior while the provider API is still stabilizing.
 
+## 0.2.0 — 2026-11-05
+
+### Changed
+
+**Semantic-candidate tier — "vector proposes, the model disposes."** The
+biggest architectural change since the hybrid pipeline existed. The top
+vector-only matches (no FTS/tag/entity/text anchor) above a calibrated
+raw-cosine floor are now OFFERED to the consuming model in a separate,
+explicitly labeled low-confidence tier, replacing both the absolute
+weak-vector-only threshold and all query-pattern rescues:
+
+- Deleted: `OWNERSHIP_QUERY_TOKENS` rescue (8375651) and the possessive
+  rescue (0.1.10). Every added rescue was whack-a-mole: a query pattern the
+  corpus didn't share lexically needed its own trigger. The tier is
+  pattern-free — any query gets its best semantic matches offered.
+- Why: a Nov 2026 spike proved no retrieval-side signal can judge intent.
+  The reranker admits llama-server records at 0.94 on "llamas in the andes"
+  while scoring the gold car record 0.164 on "for my car what do I need to
+  watch for?"; vector-score margins don't separate the cases either. Intent
+  lives with the model that reads the context — under-injection (the model
+  tells the user it doesn't know their car) is catastrophic, over-injection
+  costs context chars the model filters for free.
+- The tier bypasses the reranker gate (offers, not assertions).
+- `semantic_candidates.*` config: `enabled` (true), `max_records` (2),
+  `min_similarity` (0.46, per-embedder+corpus — calibrate with
+  `scripts/calibrate-semantic-floor.py`, which measures vector-ONLY
+  candidates), `budget_share` (0.35 of the injection budget reserved for
+  the tier; anchored records fill the rest).
+- Known limitation (documented, not patched): buried-answer paraphrase gaps
+  (true answer below the floor AND outside top-2) remain unfixable at
+  retrieval — "what faith does Joseph practice" is the live example.
+
+**Guidance (provider system prompt) sharpened:**
+
+- No-false-absence rule generalized: NEVER state that something is not in
+  memory without at least one explicit `continuity_search` with colloquial
+  vocabulary — including personal facts (vehicle, preferences, setup). The
+  Nov 5 autocross session failed socially because the model asserted "I
+  don't have your car on record" without ever searching; one search found it.
+- Semantic-tier contract: sections labeled "Semantic matches" are
+  vector-only offers that MAY be irrelevant; the model judges and silently
+  ignores mismatches.
+
 ## 0.1.10 — 2026-11-05
 
 ### Fixed

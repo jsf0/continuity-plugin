@@ -220,6 +220,7 @@ class ContinuityProvider(MemoryProvider):
             association_activation_threshold=(self._config.association_graph.activation_threshold),
             association_max_hops=self._config.association_graph.max_hops,
             gate_config=self._config.retrieval_gates,
+            semantic_config=self._config.semantic_candidates,
         ).search(
             query,
             scope_project=effective_scope,
@@ -231,6 +232,9 @@ class ContinuityProvider(MemoryProvider):
             max_chars=self._config.max_chars,
             include_sources=self._config.include_sources,
             include_scores=self._config.include_scores,
+            semantic_budget_share=self._config.semantic_candidates.budget_share
+            if self._config.semantic_candidates.enabled
+            else 0.0,
         )
         self._store.log_retrieval_event(
             query=query,
@@ -373,6 +377,7 @@ class ContinuityProvider(MemoryProvider):
                     ),
                     association_max_hops=self._config.association_graph.max_hops,
                     gate_config=self._config.retrieval_gates,
+                    semantic_config=self._config.semantic_candidates,
                 ),
                 ensure_ascii=False,
             )
@@ -397,6 +402,7 @@ class ContinuityProvider(MemoryProvider):
                     ),
                     association_max_hops=self._config.association_graph.max_hops,
                     gate_config=self._config.retrieval_gates,
+                    semantic_config=self._config.semantic_candidates,
                 ),
                 ensure_ascii=False,
             )
@@ -651,7 +657,15 @@ def _continuity_system_guidance() -> str:
             "Continuity tool discipline: empty or noisy retrieval is not proof of absence. "
             "For named commands, files, APIs, papers, paths, or exact identifiers, retry with "
             "a short literal query and one contextual query before saying continuity had no "
-            "relevant records. Example: try both 'ldomctl' and 'ldomctl OpenBSD logical domains'.",
+            "relevant records. Example: try both 'ldomctl' and 'ldomctl OpenBSD logical domains'. "
+            "The same applies to personal facts (vehicle, preferences, setup): NEVER state that "
+            "something is not in memory without at least one explicit continuity_search with "
+            "the colloquial vocabulary you would use yourself.",
+            "Semantic-match tier contract: memory-context sections labeled 'Semantic matches' "
+            "are vector-only offers with no lexical anchor. They are related to the query by "
+            "embedding similarity but MAY be irrelevant. Judge them against the conversation; "
+            "use what fits, silently ignore what does not. Their presence is not an assertion "
+            "of relevance by the memory system.",
             "Hydration discipline: continuity_hydrate takes a continuity record id, usually "
             "starting with 'r_' or 'ing_', not a corpus segment id such as 'seg_...' or a "
             "document/source id. If hydrate says record not found, search/get the owning "
@@ -696,28 +710,40 @@ def _format_prefetch_context(
     max_chars: int,
     include_sources: bool,
     include_scores: bool,
+    semantic_budget_share: float = 0.0,
 ) -> tuple[str, list[RetrievalHit]]:
     if not hits:
         return "", []
     lines = ["Relevant continuity memory:"]
     included: list[RetrievalHit] = []
-    grouped_hits = [
-        (
-            "Directly relevant continuity memory:",
-            [hit for hit in hits if hit.retrieval_role != "associative_neighbor"],
-        ),
-        (
-            "Associated continuity context (lower confidence):",
-            [hit for hit in hits if hit.retrieval_role == "associative_neighbor"],
-        ),
+    semantic = [hit for hit in hits if hit.retrieval_role == "semantic_candidate"]
+    anchored = [
+        hit
+        for hit in hits
+        if hit.retrieval_role not in ("associative_neighbor", "semantic_candidate")
     ]
-    for heading, group in grouped_hits:
+    neighbors = [hit for hit in hits if hit.retrieval_role == "associative_neighbor"]
+    # Budget reservation: when semantic offers exist, anchored records fill at
+    # most (1 - share) of the budget so a long top-ranked record can never
+    # starve the tier (the 0.1.9 failure shape, inverted).
+    anchored_budget = int(max_chars * (1.0 - semantic_budget_share)) if semantic else max_chars
+    groups: list[tuple[str, list[RetrievalHit], int]] = [
+        ("Directly relevant continuity memory:", anchored, anchored_budget),
+        (
+            "Semantic matches (vector-only, no lexical anchor; may be irrelevant — judge for yourself):",
+            semantic,
+            max_chars,
+        ),
+        ("Associated continuity context (lower confidence):", neighbors, max_chars),
+    ]
+    for heading, group, group_budget in groups:
         if not group:
             continue
         heading_added = False
+        group_spent = 0
         for hit in group:
             section_lines = [] if heading_added else [heading]
-            remaining = max_chars - len("\n".join(lines)) - 1
+            remaining = min(group_budget - group_spent, max_chars - len("\n".join(lines)) - 1)
             candidate_lines = _fit_hit(
                 len(included) + 1,
                 hit,
@@ -736,6 +762,7 @@ def _format_prefetch_context(
                 heading_added = True
             lines.extend(candidate_lines)
             included.append(hit)
+            group_spent = len("\n".join([*section_lines, *candidate_lines]))
     if not included:
         return "", []
     return "\n".join(lines), included
@@ -798,6 +825,8 @@ def _fit_hit(
 
 
 def _retrieval_role_label(role: str) -> str:
+    if role == "semantic_candidate":
+        return "semantic-offer"
     if role == "associative_neighbor":
         return "associated"
     if role == "activation_seed":

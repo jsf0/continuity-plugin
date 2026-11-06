@@ -7,7 +7,7 @@ import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
-from .config import RetrievalGateConfig
+from .config import RetrievalGateConfig, SemanticCandidatesConfig
 from .context_labels import (
     ContextCompatibility,
     ContextLabelSet,
@@ -170,10 +170,6 @@ WEAK_ANCHOR_TOKENS = (
     )
 )
 PERSONAL_QUERY_RAW_TERMS = frozenset({"i", "me", "my", "mine", "myself"})
-# Possessive determiners (raw): "my car", "our cluster", "mine". Distinct from
-# PERSONAL_QUERY_RAW_TERMS usage: a query like "what should I do" is personal
-# but not possessive; possessive queries ask about *the user's things*.
-POSSESSIVE_RAW_TERMS = frozenset({"my", "mine", "our", "ours"})
 PERSONAL_KINDS = frozenset({"user_preference", "user_fact", "personal_setup", "vehicle_fact"})
 PROJECT_STATUS_KINDS = frozenset({"active_project_state", "project_convention"})
 GENERIC_ASSOCIATION_EDGE_TYPES = frozenset({"tag_overlap", "semantic_similarity"})
@@ -209,31 +205,6 @@ PREFERENCE_QUERY_TOKENS = frozenset(
     # software-project records facet-incompatible (observed: firmware-update
     # queries rejecting the project's own design records).
     {"prefer", "preference", "prefs", "style", "work_style"}
-)
-
-# First-person ownership/attribute questions ("what car do I drive?",
-# "what phone do I use", "which OS am I running").  These queries carry a
-# strong personal anchor but often share zero lexical tokens with the
-# personal record that answers them, so the weak-vector-only gate would
-# otherwise reject the correct answer.
-OWNERSHIP_QUERY_TOKENS = frozenset(
-    {
-        "own",
-        "drive",
-        "riding",
-        "ride",
-        "carry",
-        "wear",
-        "use",
-        "using",
-        "run",
-        "running",
-        "play",
-        "playing",
-        "fly",
-        "flying",
-        "daily",
-    }
 )
 
 FACET_TOKEN_MAP = {
@@ -370,6 +341,7 @@ class ContinuityRetriever:
         association_activation_threshold: float = 0.3,
         association_max_hops: int = 2,
         gate_config: RetrievalGateConfig | None = None,
+        semantic_config: SemanticCandidatesConfig | None = None,
     ) -> None:
         self.store = store
         self.vector_backend = vector_backend
@@ -386,6 +358,7 @@ class ContinuityRetriever:
         self.association_activation_threshold = max(0.0, min(1.0, association_activation_threshold))
         self.association_max_hops = max(1, association_max_hops)
         self.gate_config = gate_config or RetrievalGateConfig()
+        self.semantic_config = semantic_config or SemanticCandidatesConfig()
 
     def search(
         self,
@@ -447,14 +420,6 @@ class ContinuityRetriever:
         effective_comparison_intent = comparison_intent or has_comparison_intent(query)
         personal_query = bool(raw_tokens & PERSONAL_QUERY_RAW_TERMS)
         preference_query = _is_preference_query(expanded_tokens, personal_query=personal_query)
-        ownership_query = personal_query and bool(expanded_tokens & OWNERSHIP_QUERY_TOKENS)
-        # Possessive attribute queries ("what maintenance does my car need")
-        # ask about the user's things WITHOUT ownership verbs (no drive/own/
-        # use), so the verb-based rescue never fired and personal records
-        # died at the full weak-vector-only threshold even when the embedder
-        # ranked them first. Possession alone is the same intent: reach the
-        # user's records through vector similarity, at the relaxed threshold.
-        possessive_query = personal_query and bool(raw_tokens & POSSESSIVE_RAW_TERMS)
         memory_meta_query = _is_memory_meta_query(expanded_tokens)
         retrieval_helpfulness_meta_query = _is_retrieval_helpfulness_meta_query(raw_tokens)
         if retrieval_helpfulness_meta_query:
@@ -572,6 +537,25 @@ class ContinuityRetriever:
                     candidates.pop(record.id, None)
                     continue
 
+        # Semantic-candidate tier: the top vector-only matches (no lexical
+        # anchor) above a raw-cosine floor are OFFERED to the model in a
+        # labeled low-confidence tier instead of being gated by absolute
+        # thresholds or query-pattern rescues. Retrieval answers 'is this
+        # related?'; the consuming model answers 'is this relevant?'.
+        semantic_ids: set[str] = set()
+        if self.semantic_config.enabled:
+            vector_only = [
+                candidate
+                for candidate in candidates.values()
+                if candidate.vector_score > 0
+                and not _candidate_has_lexical_anchor(candidate)
+                and (candidate.vector_score / VECTOR_WEIGHT) >= self.semantic_config.min_similarity
+            ]
+            vector_only.sort(key=lambda candidate: (-candidate.vector_score, candidate.record.id))
+            semantic_ids = {
+                candidate.record.id for candidate in vector_only[: self.semantic_config.max_records]
+            }
+
         selected: list[CandidateScore] = []
         rejected: list[CandidateScore] = []
         for candidate in candidates.values():
@@ -579,24 +563,19 @@ class ContinuityRetriever:
                 candidate.rejected_reason = "below_min_base_relevance"
                 rejected.append(candidate)
                 continue
-            if self.gate_config.weak_vector_only and _is_weak_vector_only_candidate(
+            if candidate.record.id in semantic_ids:
+                # Offered via the semantic-candidate tier (vector-only match
+                # above the calibrated floor): skip the absolute vector-only
+                # gate entirely. The consuming model judges relevance —
+                # retrieval only answered 'is this related?'.
+                candidate.retrieval_role = "semantic_candidate"
+                candidate.reasons.append("semantic_candidate")
+            elif self.gate_config.weak_vector_only and _is_weak_vector_only_candidate(
                 candidate, self.gate_config
             ):
-                # First-person ownership/attribute questions ("what car do I
-                # drive?") legitimately reach personal records through vector
-                # similarity alone: the query noun often never appears in the
-                # record text.  Relax the vector-only gate for personal-kind
-                # records on such queries, at half the normal threshold.
-                if (
-                    (ownership_query or possessive_query)
-                    and candidate.record.kind in PERSONAL_KINDS
-                    and candidate.vector_score >= self.gate_config.min_vector_only_relevance * 0.5
-                ):
-                    candidate.reasons.append("ownership_query_vector_rescue")
-                else:
-                    candidate.rejected_reason = "weak_vector_only_without_anchor"
-                    rejected.append(candidate)
-                    continue
+                candidate.rejected_reason = "weak_vector_only_without_anchor"
+                rejected.append(candidate)
+                continue
             _apply_scope_score(candidate, expanded_tokens, effective_scope)
             _apply_boosts_and_penalties(candidate, personal_query=personal_query)
             if (
@@ -715,6 +694,22 @@ class ContinuityRetriever:
         selected.sort(key=_candidate_selection_sort_key)
         selected = _suppress_duplicate_families(selected)
         rejected.sort(key=lambda candidate: (-candidate.total, candidate.record.id))
+        if limit and self.semantic_config.enabled:
+            # Guarantee the tier its slots: anchored records yield the last
+            # n_sem slots of the limit so vector-only offers are never
+            # squeezed out by higher-scoring anchored candidates.
+            semantic = [
+                candidate
+                for candidate in selected
+                if candidate.retrieval_role == "semantic_candidate"
+            ][: self.semantic_config.max_records]
+            if semantic:
+                n_sem = min(len(semantic), max(1, limit - 1))
+                keep = {candidate.record.id for candidate in semantic[:n_sem]}
+                others = [candidate for candidate in selected if candidate.record.id not in keep][
+                    : max(0, limit - n_sem)
+                ]
+                selected = others + semantic[:n_sem]
         return {
             "query": query,
             "query_context": context_to_mapping(effective_query_context),
@@ -740,7 +735,14 @@ class ContinuityRetriever:
         ):
             return
         selected.sort(key=lambda candidate: (-candidate.total, candidate.record.id))
-        rerank_pool = selected[: self.reranker_top_k]
+        # Semantic candidates are offers, not assertions: cross-encoders both
+        # admit junk and reject gold on vector-bridged pairs (Nov 2026 spike),
+        # so the tier bypasses the reranker entirely.
+        rerank_pool = [
+            candidate
+            for candidate in selected[: self.reranker_top_k]
+            if candidate.retrieval_role != "semantic_candidate"
+        ]
         scores = {
             hit.record_id: hit.score
             for hit in self.reranker_backend.rerank(
@@ -801,7 +803,8 @@ class ContinuityRetriever:
         frontier: list[tuple[str, float, int, str]] = []
 
         for candidate in selected:
-            candidate.retrieval_role = "direct_seed"
+            if candidate.retrieval_role != "semantic_candidate":
+                candidate.retrieval_role = "direct_seed"
             activation = _candidate_activation(candidate)
             candidate.activation = max(candidate.activation, activation)
             frontier.append((candidate.record.id, activation, 0, candidate.record.id))
@@ -1676,6 +1679,18 @@ def _record_identifier_tokens(record: ContextRecord) -> set[str]:
         if source.uri:
             tokens.update(_query_tokens(source.uri))
     return tokens
+
+
+def _candidate_has_lexical_anchor(candidate: CandidateScore) -> bool:
+    return any(
+        score > 0
+        for score in (
+            candidate.fts_score,
+            candidate.tag_score,
+            candidate.entity_score,
+            candidate.text_score,
+        )
+    )
 
 
 def _is_weak_vector_only_candidate(

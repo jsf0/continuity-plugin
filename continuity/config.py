@@ -73,6 +73,30 @@ class DreamConfig:
 
 
 @dataclass(frozen=True)
+class SemanticCandidatesConfig:
+    """Vector-only candidate tier: 'vector proposes, the model disposes.'
+
+    The top-N vector-only matches (no FTS/tag/entity/text anchor) above a
+    minimal raw-cosine floor are OFFERED to the consuming model in a separate,
+    explicitly labeled low-confidence tier, instead of being gated by the
+    absolute vector-only threshold or by query-pattern rescues. Intent lives
+    with the model; retrieval only answers 'is this related?'.
+    """
+
+    enabled: bool = True
+    max_records: int = 2
+    # Raw cosine floor, calibrated per embedder+corpus. mxbai-embed-large-v1
+    # on the Nov 2026 corpus: on-domain top vector-only matches score
+    # 0.477+, clearly-nothing queries top out ~0.45 (see
+    # scripts/calibrate-semantic-floor.py). Borderline off-domain cases
+    # above the floor are accepted noise: the model dismisses them.
+    min_similarity: float = 0.46
+    # Fraction of the injection budget reserved for the tier when semantic
+    # candidates exist. Anchored records fill the rest.
+    budget_share: float = 0.35
+
+
+@dataclass(frozen=True)
 class ContinuityConfig:
     """Runtime configuration for continuity memory."""
 
@@ -103,6 +127,7 @@ class ContinuityConfig:
     pinned_system_prompt: PinnedSystemPromptConfig = field(default_factory=PinnedSystemPromptConfig)
     association_graph: AssociationGraphConfig = field(default_factory=AssociationGraphConfig)
     dream: DreamConfig = field(default_factory=DreamConfig)
+    semantic_candidates: SemanticCandidatesConfig = field(default_factory=SemanticCandidatesConfig)
 
     @classmethod
     def from_mapping(cls, value: dict[str, Any] | None) -> ContinuityConfig:
@@ -119,6 +144,11 @@ class ContinuityConfig:
         )
         gates = data.get("retrieval_gates") if isinstance(data.get("retrieval_gates"), dict) else {}
         dream = data.get("dream") if isinstance(data.get("dream"), dict) else {}
+        semantic = (
+            data.get("semantic_candidates")
+            if isinstance(data.get("semantic_candidates"), dict)
+            else {}
+        )
         strategy = str(data.get("session_strategy") or "per-repo")
         if strategy not in VALID_SESSION_STRATEGIES:
             strategy = "per-repo"
@@ -216,6 +246,12 @@ class ContinuityConfig:
                     max(0.0, _float(association.get("activation_threshold"), 0.3)),
                 ),
                 max_hops=max(1, _int(association.get("max_hops"), 2)),
+            ),
+            semantic_candidates=SemanticCandidatesConfig(
+                enabled=_bool(semantic.get("enabled"), True),
+                max_records=max(1, _int(semantic.get("max_records"), 2)),
+                min_similarity=min(1.0, max(0.0, _float(semantic.get("min_similarity"), 0.46))),
+                budget_share=min(0.9, max(0.1, _float(semantic.get("budget_share"), 0.35))),
             ),
             dream=DreamConfig(
                 enabled=_bool(dream.get("enabled"), False),
