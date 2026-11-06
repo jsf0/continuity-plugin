@@ -5,6 +5,32 @@ All notable changes to Hermes Continuity Memory are documented here.
 This project uses pre-1.0 semantic versioning. Minor versions may change plugin
 behavior while the provider API is still stabilizing.
 
+## 0.1.9 — 2026-11-05
+
+### Fixed
+
+- Prefetch injection budget no longer lets record LENGTH subvert score order.
+  `_format_prefetch_context` filled the max_chars budget greedily and SKIPPED
+  any hit that did not fit, so a long top-ranked record could consume the
+  budget and get the #2 hit silently dropped while smaller, lower-scored
+  records slipped in. Observed live (autocross/HPDE session): the user's car
+  record ranked #2 by retrieval score but was skipped at injection because
+  the #1 firmware note was long, and the assistant then told the user "I don't
+  have your car on record" — while an explicit continuity_search found it
+  instantly. Hits that do not fit are now truncated to the remaining budget
+  (>=100-char fragment) instead of dropped. 3 regression tests in
+  tests/test_prefetch_budget.py.
+
+### Notes
+
+- Live-store fix for the same session: the car record's text never contained
+  the word "car", so every "my car" question was unreachable by FTS and
+  died at the weak-vector-only gate when the query lacked ownership verbs
+  ("what maintenance do I need for my car" — no drive/own/use). The record
+  now contains "car"/"vehicle" and ranks #1 on those queries. General lesson
+  (already in the skill): records about a thing should contain the colloquial
+  noun users type, not just proper nouns.
+
 ## 0.1.8 — 2026-11-05
 
 ### Added

@@ -717,7 +717,17 @@ def _format_prefetch_context(
         heading_added = False
         for hit in group:
             section_lines = [] if heading_added else [heading]
-            candidate_lines = _format_hit(len(included) + 1, hit, include_sources, include_scores)
+            remaining = max_chars - len("\n".join(lines)) - 1
+            candidate_lines = _fit_hit(
+                len(included) + 1,
+                hit,
+                include_sources,
+                include_scores,
+                remaining=remaining,
+                section_lines=section_lines,
+            )
+            if candidate_lines is None:
+                continue
             candidate_output = "\n".join([*lines, *section_lines, *candidate_lines])
             if len(candidate_output) > max_chars:
                 continue
@@ -753,6 +763,38 @@ def _format_hit(
         if source_text:
             lines.append(f"   Sources: {source_text}")
     return lines
+
+
+def _fit_hit(
+    index: int,
+    hit: RetrievalHit,
+    include_sources: bool,
+    include_scores: bool,
+    *,
+    remaining: int,
+    section_lines: list[str],
+) -> list[str] | None:
+    """Render a hit within a character budget, truncating the summary rather
+    than dropping the record.
+
+    The injection loop must never let record LENGTH subvert score order: a
+    long top-ranked record used to consume the whole budget and get the #2
+    hit skipped while smaller, lower-scored records slipped in (observed
+    live: the WRX ownership record, ranked #2, was silently skipped on an
+    autocross question because the #1 firmware note was long). Summary lines
+    are truncated to fit; a hit is only dropped when the remaining budget
+    cannot hold a meaningful fragment.
+    """
+    base = _format_hit(index, hit, include_sources, include_scores)
+    if len("\n".join([*section_lines, *base])) <= remaining:
+        return base
+    header = base[0]
+    overhead = len("\n".join([*section_lines, header])) + len("\n   ") + 3  # indent + "..."
+    summary_budget = remaining - overhead - 1
+    if summary_budget < 100:
+        return None
+    summary = hit.record.summary[:summary_budget].rstrip()
+    return [header, f"   {summary}..."]
 
 
 def _retrieval_role_label(role: str) -> str:
